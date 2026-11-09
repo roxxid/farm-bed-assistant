@@ -12,13 +12,19 @@ with the local Qwen2.5-VL-7B vision model.
 | `capture.py` | Orchestrates pan → capture → vision → store | koli host |
 
 ## Notes / gotchas
-- The E30 is a **battery** camera — it has **no RTSP**. Frames come from a
-  short P2P livestream (startStationLivestream → pipe H.264 to ffmpeg, grab 1 frame).
-- The livestream needs the station P2P session to connect first; the frame grab
-  can take 15–30s on a cold camera (wake-up). `capture-frame.js` allows 60s.
-- `PAN_TO_BED` / `PAN_TO_REST` in `capture.py` are **placeholders** and must be
-  tuned against the live view (the exact step count to swing 180° and tilt down
-  to the bed is camera-installation specific).
+- The E30 is a **battery** camera (currently `power: plugged`, battery 100%) — it has
+  **no RTSP** (`rtspStream` property is undefined; `CMD_NAS_SWITCH` sent but no URL). Frames
+  come from a short P2P livestream (startStationLivestream → pipe H.264 to ffmpeg, grab 1 frame).
+- **Use ONE connection per run** (`camera-run.js`). Separate `pan.js` + `capture-frame.js`
+  processes each open their own P2P session and leave stale ones behind, which blocks the
+  next livestream. `camera-run.js` connects once and does pan → capture → pan back → close.
+- `driver.close()` hangs on P2P teardown — always guard with a hard `process.exit` timer.
+- **Livestream is flaky**: the first grab succeeds, but repeat runs often time out waiting
+  for the `station livestream start` event (the stream simply never starts). Suspected
+  causes: battery-cam sleep/wake cycle, a livestream cooldown, or conflict with the
+  Homebridge plugin's own HomeKit livestream on the same camera. Needs investigation —
+  see the capture-failure notes.
+- `PAN_TO_BED` / `PAN_TO_REST` are **placeholders** and must be tuned against the live view.
 
 ## Deploy to koli
 ```bash

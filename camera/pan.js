@@ -20,5 +20,10 @@ const SERIAL = process.argv[3] || 'T8171T1025090F93'; // Backyard
   console.log('station:', station.getName(), '| camera:', cam.getName(), '| hasPanAndTilt:', cam.hasCommand('devicePanAndTilt'));
   await station.panAndTilt(cam, dir);
   console.log('PAN/TILT SENT: direction', dir);
-  await driver.close();
+  // close the station P2P session cleanly so it doesn't block the next livestream;
+  // guard with a hard timeout because P2P teardown can hang.
+  const killer = setTimeout(() => process.exit(0), 6000);
+  try { await station.close(); } catch (e) {}
+  clearTimeout(killer);
+  process.exit(0);
 })().catch(e => { console.error('ERR:', e.message); process.exit(1); });
