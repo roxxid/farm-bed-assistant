@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """farm-bed camera service — runs ON koli.
 
-Orchestrates: pan camera -> capture frame(s) -> vision-analyze -> store.
+Orchestrates: camera-run.js (pan → capture → pan back, single connection)
+→ vision-analyze the result → store in the media tree.
 
 Modes:
   still   single hourly frame of the bed
@@ -12,21 +13,18 @@ Storage layout (on koli):
   /mnt/user/appdata/farm-bed/media/YYYY/MM/DD/sweep_HHMMSS.mp4
   /mnt/user/appdata/farm-bed/media/YYYY/MM/DD/*.json   (vision analysis)
 """
+import base64
 import json
 import os
+import shutil
 import subprocess
 import sys
-import time
+import urllib.request
 from datetime import datetime
 
 MEDIA_ROOT = "/mnt/user/appdata/farm-bed/media"
 VISION_URL = "http://127.0.0.1:8769/v1/chat/completions"
 SERIAL = "T8171T1025090F93"  # Backyard SoloCam E30
-
-# pan/tilt: 0=rotate360 1=left 2=right 3=up 4=down
-# Sequence to go from backyard resting -> farm bed (TUNE THIS against the live view)
-PAN_TO_BED = [(2, 4), (4, 3)]   # e.g. rotate right x4, tilt down x3
-PAN_TO_REST = [(3, 3), (1, 4)]  # tilt up x3, rotate left x4 (reverse)
 
 PROMPT = (
     "You are a garden monitor. Describe this raised-bed image concisely: "
@@ -37,31 +35,33 @@ PROMPT = (
 
 
 def sh(cmd, timeout=120):
-    r = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
-    return r
+    return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
 
-def docker_exec(container_cmd, timeout=120):
-    return sh(f"docker exec homebridge {container_cmd}", timeout)
+def run_camera(mode):
+    """Run camera-run.js in the homebridge container. Returns the container path it saved."""
+    r = sh(f"docker exec homebridge node /tmp/camera-run.js {mode} {SERIAL} /tmp", timeout=360)
+    if r.stdout:
+        print(r.stdout.strip())
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
+        if line.startswith("STILL_SAVED"):
+            return line.split(" ", 1)[1].strip()
+        if line.startswith("stitched:"):
+            return line.split(":", 1)[1].strip()
+    ls = sh("docker exec homebridge sh -c 'ls -t /tmp/still_*.jpg 2>/dev/null | head -1'")
+    if ls.stdout.strip():
+        return ls.stdout.strip()
+    return None
 
 
-def pan(direction, count=1):
-    for _ in range(count):
-        r = docker_exec(f"node /tmp/farm-pan.js {direction} {SERIAL}")
-        if r.returncode != 0:
-            print("PAN FAILED:", r.stderr[-200:])
-            return False
-        time.sleep(1.5)
-    return True
-
-
-def capture_frame(out_path):
-    r = docker_exec(f"node /tmp/farm-snap.js {SERIAL} {out_path}", timeout=90)
-    return r.returncode == 0 and os.path.exists(out_path)
+def pull_from_container(container_path, local_path):
+    sh(f"docker cp homebridge:{container_path} {local_path}")
+    return os.path.exists(local_path) and os.path.getsize(local_path) > 0
 
 
 def vision_analyze(img_path):
-    import base64, urllib.request
     img = base64.b64encode(open(img_path, "rb").read()).decode()
     payload = {"messages": [{"role": "user", "content": [
         {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + img}},
@@ -79,11 +79,11 @@ def day_dir():
     return d
 
 
-def store(img_path, kind, analysis):
+def store(local_path, kind, analysis):
     ts = datetime.now().strftime("%H%M%S")
-    ext = ".jpg" if kind == "still" else ".mp4"
+    ext = os.path.splitext(local_path)[1] or (".jpg" if kind == "still" else ".mp4")
     final = os.path.join(day_dir(), f"{kind}_{ts}{ext}")
-    os.rename(img_path, final)
+    shutil.move(local_path, final)  # shutil.move handles cross-device (/tmp -> /mnt/user)
     meta = {"kind": kind, "path": os.path.relpath(final, MEDIA_ROOT),
             "captured_at": datetime.now().isoformat(), "analysis": analysis}
     with open(os.path.join(day_dir(), f"{kind}_{ts}.json"), "w") as f:
@@ -94,57 +94,37 @@ def store(img_path, kind, analysis):
 
 
 def mode_still():
-    tmp = "/tmp/farm-still.jpg"
-    print("panning to bed...")
-    for d, c in PAN_TO_BED:
-        if not pan(d, c):
-            return 1
-    time.sleep(3)
-    print("capturing frame...")
-    if not capture_frame(tmp):
-        print("CAPTURE FAILED")
+    container_path = run_camera("still")
+    if not container_path:
+        print("CAMERA FAILED")
         return 1
-    analysis = vision_analyze(tmp)
-    store(tmp, "still", analysis)
-    print("panning back to rest...")
-    for d, c in PAN_TO_REST:
-        pan(d, c)
+    local = "/tmp/farm-still.jpg"
+    if not pull_from_container(container_path, local):
+        print("PULL FAILED")
+        return 1
+    try:
+        analysis = vision_analyze(local)
+    except Exception as e:
+        analysis = f"vision error: {e}"
+    store(local, "still", analysis)
     return 0
 
 
 def mode_sweep(frames=8):
-    tmpdir = "/tmp/farm-sweep"
-    sh(f"rm -rf {tmpdir}; mkdir -p {tmpdir}")
-    print("panning to bed...")
-    for d, c in PAN_TO_BED:
-        if not pan(d, c):
-            return 1
-    time.sleep(2)
-    print(f"capturing {frames} frames across the bed...")
-    paths = []
-    for i in range(frames):
-        p = f"{tmpdir}/f{i:02d}.jpg"
-        if capture_frame(p):
-            paths.append(p)
-        pan(2, 1)  # rotate right between frames
-        time.sleep(1)
-    if not paths:
-        print("NO FRAMES CAPTURED")
+    container_clip = run_camera("sweep")
+    if not container_clip:
+        print("CAMERA SWEEP FAILED")
         return 1
-    ts = datetime.now().strftime("%H%M%S")
-    clip = f"{tmpdir}/sweep.mp4"
-    r = sh(f"ffmpeg -y -loglevel error -framerate 4 -pattern_type glob -i '{tmpdir}/f*.jpg' -c:v libx264 -pix_fmt yuv420p {clip}")
-    if r.returncode != 0:
-        print("STITCH FAILED:", r.stderr[-300:])
+    local = "/tmp/farm-sweep.mp4"
+    if not pull_from_container(container_clip, local):
+        print("PULL FAILED")
         return 1
-    # analyze the last frame as the representative view
-    analysis = vision_analyze(paths[-1])
-    store(clip, "sweep", analysis)
-    for p in paths:
-        os.remove(p)
-    print("panning back to rest...")
-    for d, c in PAN_TO_REST:
-        pan(d, c)
+    sh(f"ffmpeg -y -loglevel error -i {local} -frames:v 1 /tmp/farm-sweep-still.jpg")
+    try:
+        analysis = vision_analyze("/tmp/farm-sweep-still.jpg")
+    except Exception as e:
+        analysis = f"vision error: {e}"
+    store(local, "sweep", analysis)
     return 0
 
 

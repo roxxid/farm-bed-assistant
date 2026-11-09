@@ -51,6 +51,17 @@ function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
   });
 }
 
+async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    const ok = await grabFrame(driver, station, cam, outPath, 40000);
+    if (ok) return true;
+    console.log(`frame grab attempt ${i + 1}/${attempts} failed — retrying`);
+    try { await driver.stopStationLivestream(SERIAL); } catch {}
+    await sleep(6000);
+  }
+  return false;
+}
+
 (async () => {
   const driver = await EufySecurity.initialize({
     country: eufy.country || 'US', language: 'en',
@@ -60,6 +71,7 @@ function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
   await driver.connect();
   const cam = await driver.getDevice(SERIAL);
   const station = await driver.getStation(cam.getStationSerial());
+  driver.setCameraMaxLivestreamDuration(120); // don't auto-stop mid-wake
   console.log('connected | station:', station.getName(), '| cam:', cam.getName());
 
   // pan to bed
@@ -73,7 +85,7 @@ function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
     console.log(`capturing ${SWEEP_FRAMES} frames...`);
     for (let i = 0; i < SWEEP_FRAMES; i++) {
       const p = path.join(OUTDIR, `sweep_${ts}_f${String(i).padStart(2, '0')}.jpg`);
-      const ok = await grabFrame(driver, station, cam, p);
+      const ok = await grabFrameWithRetry(driver, station, cam, p, 2);
       if (ok) frames.push(p);
       await pan(station, cam, 2, 1); // rotate right between frames
     }
@@ -88,7 +100,7 @@ function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
   } else {
     const out = path.join(OUTDIR, `still_${ts}.jpg`);
     console.log('capturing still...');
-    const ok = await grabFrame(driver, station, cam, out);
+    const ok = await grabFrameWithRetry(driver, station, cam, out);
     console.log(ok ? ('STILL_SAVED ' + out) : 'STILL_FAILED');
   }
 
