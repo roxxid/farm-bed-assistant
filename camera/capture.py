@@ -39,21 +39,13 @@ def sh(cmd, timeout=120):
 
 
 def run_camera(mode):
-    """Run camera-run.js in the homebridge container. Returns the container path it saved."""
-    r = sh(f"docker exec homebridge node /tmp/camera-run.js {mode} {SERIAL} /tmp", timeout=360)
+    """Capture the bed's current (default) view — no pan (the default is now the bed)."""
+    r = sh(f"docker exec homebridge node /tmp/capture-now.js {SERIAL} /tmp/capture-now.jpg", timeout=360)
     if r.stdout:
         print(r.stdout.strip())
     if r.returncode != 0:
         return None
-    for line in r.stdout.splitlines():
-        if line.startswith("STILL_SAVED"):
-            return line.split(" ", 1)[1].strip()
-        if line.startswith("stitched:"):
-            return line.split(":", 1)[1].strip()
-    ls = sh("docker exec homebridge sh -c 'ls -t /tmp/still_*.jpg 2>/dev/null | head -1'")
-    if ls.stdout.strip():
-        return ls.stdout.strip()
-    return None
+    return "/tmp/capture-now.jpg"
 
 
 def pull_from_container(container_path, local_path):
@@ -62,15 +54,14 @@ def pull_from_container(container_path, local_path):
 
 
 def vision_analyze(img_path):
+    """Analyze via the app's /api/vision, which seeds the prompt with the CURRENT grid."""
     img = base64.b64encode(open(img_path, "rb").read()).decode()
-    payload = {"messages": [{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + img}},
-        {"type": "text", "text": PROMPT},
-    ]}], "temperature": 0.1, "max_tokens": 300}
-    req = urllib.request.Request(VISION_URL, data=json.dumps(payload).encode(),
+    payload = {"image_b64": img}
+    req = urllib.request.Request("http://127.0.0.1:8090/api/vision",
+                                 data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
     r = json.loads(urllib.request.urlopen(req, timeout=180).read())
-    return r["choices"][0]["message"]["content"]
+    return r["text"]
 
 
 def day_dir():
