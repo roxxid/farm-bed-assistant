@@ -38,6 +38,12 @@
       </div>
     </div>
 
+    <!-- latest capture first -->
+    <div class="panel">
+      <h3>Latest from the camera</h3>
+      <div class="latest" id="latest"></div>
+    </div>
+
     <div class="widgets">
       <div class="widget accent"><div class="k">Planted</div><div class="v" id="wPlanted">—</div><div class="s" id="wPlantedSub">squares in use</div></div>
       <div class="widget warn"><div class="k">Ready to harvest</div><div class="v" id="wReady">—</div><div class="s" id="wReadySub"></div></div>
@@ -45,25 +51,16 @@
       <div class="widget"><div class="k">Open squares</div><div class="v" id="wEmpty">—</div><div class="s">ready for planting</div></div>
     </div>
 
-    <div class="columns">
-      <div>
-        <div class="panel">
-          <h3>Latest from the camera</h3>
-          <div class="latest" id="latest"></div>
-        </div>
-        <div class="panel" style="margin-top:18px">
-          <h3>Recent captures</h3>
-          <div class="sub">hourly stills + daily sweeps, zoomed on the bed</div>
-          <div class="strip" id="strip"></div>
-        </div>
-      </div>
-      <div>
-        <div class="panel">
-          <h3>Harvest calendar</h3>
-          <div class="sub">sorted by expected pick date</div>
-          <div id="calendar"></div>
-        </div>
-      </div>
+    <div class="panel">
+      <h3>Scroll back</h3>
+      <div class="sub">swipe → through past captures</div>
+      <div class="strip" id="strip"></div>
+    </div>
+
+    <div class="panel">
+      <h3>Harvest calendar</h3>
+      <div class="sub">sorted by expected pick date</div>
+      <div id="calendar"></div>
     </div>
   </div>
 
@@ -91,17 +88,19 @@
   $('#wNextSub').textContent = overview.next_harvest_label ? `square ${overview.next_harvest_label}` : 'nothing planted';
   $('#wEmpty').textContent = overview.empty;
 
-  // latest capture
+  // latest capture (shared helper)
   const latest = $('#latest');
-  if (media.media.length) {
-    const m = media.media[0];
+  function showLatest(m) {
     const isVideo = m.kind === 'sweep';
     latest.innerHTML = `
       <div class="shot">${isVideo
-        ? `<video src="${m.url}" controls></video>`
-        : `<img src="${m.url}" alt="latest capture">`}</div>
+        ? `<video src="${m.url}" controls autoplay></video>`
+        : `<img src="${m.url}" alt="capture">`}</div>
       ${m.analysis ? `<div class="ai"><b>AI read:</b> ${m.analysis}</div>` : ''}
-      <div class="meta" style="color:var(--ink-soft);font-size:12px">${m.kind} · ${m.captured_at ? fmtDateFull(m.captured_at) : ''}</div>`;
+      <div style="color:var(--ink-soft);font-size:12px">${m.kind} · ${m.captured_at ? fmtDateFull(m.captured_at) : ''}</div>`;
+  }
+  if (media.media.length) {
+    showLatest(media.media[0]);
   } else {
     latest.innerHTML = `<div class="empty">No captures yet. They'll appear here once the camera service runs.</div>`;
   }
@@ -109,28 +108,20 @@
   // media strip
   const strip = $('#strip');
   if (media.media.length) {
-    strip.innerHTML = media.media.slice(0, 8).map((m) => {
+    strip.innerHTML = media.media.map((m) => {
       const isVideo = m.kind === 'sweep';
-      return `<div class="thumb" data-url="${m.url}" data-kind="${m.kind}" data-analysis="${encodeURIComponent(m.analysis || '')}" title="${m.kind}">
-        ${isVideo ? `<img src="" alt="">` : `<img src="${m.url}" alt="" loading="lazy">`}
+      return `<div class="thumb" data-url="${m.url}" data-kind="${m.kind}" data-analysis="${encodeURIComponent(m.analysis || '')}">
+        ${isVideo
+          ? `<span style="display:grid;place-items:center;height:100%;font-size:28px;color:#fff">▶</span>`
+          : `<img src="${m.url}" alt="" loading="lazy">`}
         <span class="badge">${m.kind}</span>
         <span class="when">${fmtDate(m.captured_at)}</span>
       </div>`;
     }).join('');
     strip.querySelectorAll('.thumb').forEach(t => t.addEventListener('click', () => {
-      const url = t.dataset.url;
-      const latest = $('#latest');
-      const isVideo = t.dataset.kind === 'sweep';
-      latest.innerHTML = `
-        <div class="shot">${isVideo ? `<video src="${url}" controls autoplay></video>` : `<img src="${url}">`}</div>
-        ${t.dataset.analysis ? `<div class="ai"><b>AI read:</b> ${decodeURIComponent(t.dataset.analysis)}</div>` : ''}`;
-      latest.scrollIntoView({ behavior: 'smooth' });
+      showLatest({ url: t.dataset.url, kind: t.dataset.kind, analysis: decodeURIComponent(t.dataset.analysis) });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }));
-    // for sweep thumbs, put a play glyph
-    strip.querySelectorAll('.thumb[data-kind="sweep"] img').forEach(i => i.remove());
-    strip.querySelectorAll('.thumb[data-kind="sweep"]').forEach(t => {
-      t.innerHTML = `<span style="display:grid;place-items:center;height:100%;font-size:26px;color:#fff">▶</span><span class="badge">sweep</span>`;
-    });
   } else {
     strip.innerHTML = `<div class="empty-note">No captures yet.</div>`;
   }
