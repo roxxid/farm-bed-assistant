@@ -196,6 +196,20 @@ button { font-family: var(--font-ui); cursor: pointer; }
 .cell.empty .plus { color: #6a5f47; font-size: 16px; opacity: .5; }
 .cell.selected { box-shadow: 0 0 0 2px var(--sun), 0 0 0 4px rgba(217,144,46,.25); }
 .cell.ready { box-shadow: inset 0 0 0 2px var(--sun); }
+.bed .north-tag {
+  position: absolute; top: 6px; right: 8px; z-index: 3;
+  display: flex; align-items: center; gap: 4px;
+  background: rgba(246,242,234,.95); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px 9px;
+  font-size: 10px; font-weight: 700; color: var(--ink); pointer-events: none;
+}
+.bed .north-tag .arr { color: var(--leaf); font-weight: 800; }
+.bed .fence-edge {
+  position: absolute; right: 0; top: 0; bottom: 0; z-index: 2;
+  border-right: 2px solid rgba(217,144,46,.5);
+  border-radius: 0 10px 10px 0;
+  pointer-events: none;
+}
 .legend { display: flex; gap: 14px; margin-top: 12px; flex-wrap: wrap; font-size: 11px; color: var(--ink-soft); }
 .legend span { display: flex; align-items: center; gap: 5px; }
 .legend .swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }

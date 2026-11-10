@@ -47,9 +47,12 @@ PLANTS = {
     "radish":      {"name": "Radish",      "ico": "🫜", "per": 16, "days": 25,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Root",      "comp": "Carrot, cucumber"},
     "garlic":      {"name": "Garlic",      "ico": "🧄", "per": 9,  "days": 210, "sun": "full",    "water": "low",    "trellis": False, "grp": "Root",      "comp": "Tomato, pepper", "perennial": True},
     "basil":       {"name": "Basil",       "ico": "🌿", "per": 4,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Tomato, pepper"},
+    "thai_basil":  {"name": "Thai basil",  "ico": "🌱", "per": 4,  "days": 60,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Tomato, pepper"},
+    "cilantro":    {"name": "Cilantro",    "ico": "🍃", "per": 9,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Tomato, spinach"},
     "chives":      {"name": "Chives",      "ico": "🌿", "per": 16, "days": 60,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Herb",      "comp": "Carrot, tomato"},
     "lemongrass":  {"name": "Lemongrass",  "ico": "🌾", "per": 1,  "days": 90,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Most vegetables"},
     "rhubarb":     {"name": "Rhubarb",     "ico": "🌿", "per": 1,  "days": 365, "sun": "full",    "water": "medium", "trellis": False, "grp": "Perennial", "comp": "Permanent bed", "perennial": True},
+    "curry_leaves": {"name": "Curry leaves", "ico": "🌿", "per": 1, "days": 365, "sun": "full",   "water": "medium", "trellis": False, "grp": "Perennial", "comp": "Most vegetables", "perennial": True},
     "strawberry":  {"name": "Strawberry",  "ico": "🍓", "per": 4,  "days": 90,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Fruiting",  "comp": "Spinach, lettuce", "perennial": True},
     "marigold":    {"name": "Marigold",    "ico": "🌼", "per": 4,  "days": 50,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Flower",    "comp": "Tomato, everything", "companion": True},
 }

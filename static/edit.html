@@ -122,6 +122,14 @@ function renderBed() {
     });
     bed.appendChild(cell);
   });
+  // north marker: fence = north = right side (matches the camera view)
+  const nt = document.createElement('div');
+  nt.className = 'north-tag';
+  nt.innerHTML = '<span class="arr">N →</span> Fence';
+  bed.appendChild(nt);
+  const fe = document.createElement('div');
+  fe.className = 'fence-edge';
+  bed.appendChild(fe);
   const used = SQUARES.filter(s => s.planting).length;
   $('#bedMeta').textContent = `${used} / ${SQUARES.length} planted`;
 }
