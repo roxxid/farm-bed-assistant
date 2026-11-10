@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Farm Bed — Overview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <h1>Farm Bed</h1>
+      <span class="sub">square-foot garden · 6×6</span>
+    </div>
+    <div class="spacer"></div>
+    <nav class="nav">
+      <a href="/" class="active">Overview</a>
+      <a href="/edit">Edit bed</a>
+    </nav>
+    <div class="spacer"></div>
+    <div class="weather">
+      <div class="chip temp"><span class="dot"></span><span class="lbl">Temp</span><span class="val" id="chipTemp">—</span></div>
+      <div class="chip sun"><span class="dot"></span><span class="lbl">Sun</span><span class="val" id="chipSun">—</span></div>
+      <div class="chip water"><span class="dot"></span><span class="lbl">Moisture</span><span class="val" id="chipMoist">—</span></div>
+      <div class="chip" id="chipDate"></div>
+    </div>
+  </div>
+
+  <div class="page">
+    <div class="page-head">
+      <h2>Today at a glance</h2>
+      <span class="meta" id="pageDate"></span>
+      <div class="actions">
+        <a class="btn primary" href="/edit">Edit the bed →</a>
+      </div>
+    </div>
+
+    <div class="widgets">
+      <div class="widget accent"><div class="k">Planted</div><div class="v" id="wPlanted">—</div><div class="s" id="wPlantedSub">squares in use</div></div>
+      <div class="widget warn"><div class="k">Ready to harvest</div><div class="v" id="wReady">—</div><div class="s" id="wReadySub"></div></div>
+      <div class="widget"><div class="k">Next harvest</div><div class="v" id="wNext">—</div><div class="s" id="wNextSub"></div></div>
+      <div class="widget"><div class="k">Open squares</div><div class="v" id="wEmpty">—</div><div class="s">ready for planting</div></div>
+    </div>
+
+    <div class="columns">
+      <div>
+        <div class="panel">
+          <h3>Latest from the camera</h3>
+          <div class="latest" id="latest"></div>
+        </div>
+        <div class="panel" style="margin-top:18px">
+          <h3>Recent captures</h3>
+          <div class="sub">hourly stills + daily sweeps, zoomed on the bed</div>
+          <div class="strip" id="strip"></div>
+        </div>
+      </div>
+      <div>
+        <div class="panel">
+          <h3>Harvest calendar</h3>
+          <div class="sub">sorted by expected pick date</div>
+          <div id="calendar"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="/static/app.js"></script>
+<script>
+(async () => {
+  renderWeather();
+  $('#pageDate').textContent = fmtDateFull(todayISO());
+
+  const [overview, media, bed] = await Promise.all([
+    API.get('/api/overview'), API.get('/api/media'), API.get('/api/bed'),
+  ]);
+
+  // widgets
+  $('#wPlanted').textContent = overview.planted;
+  $('#wPlantedSub').textContent = `of ${overview.total_squares} squares`;
+  $('#wReady').textContent = overview.ready;
+  $('#wReadySub').textContent = overview.ready ? 'pick today!' : 'nothing ready yet';
+  $('#wNext').textContent = overview.next_harvest_at ? fmtDate(overview.next_harvest_at) : '—';
+  $('#wNextSub').textContent = overview.next_harvest_label ? `square ${overview.next_harvest_label}` : 'nothing planted';
+  $('#wEmpty').textContent = overview.empty;
+
+  // latest capture
+  const latest = $('#latest');
+  if (media.media.length) {
+    const m = media.media[0];
+    const isVideo = m.kind === 'sweep';
+    latest.innerHTML = `
+      <div class="shot">${isVideo
+        ? `<video src="${m.url}" controls></video>`
+        : `<img src="${m.url}" alt="latest capture">`}</div>
+      ${m.analysis ? `<div class="ai"><b>AI read:</b> ${m.analysis}</div>` : ''}
+      <div class="meta" style="color:var(--ink-soft);font-size:12px">${m.kind} · ${m.captured_at ? fmtDateFull(m.captured_at) : ''}</div>`;
+  } else {
+    latest.innerHTML = `<div class="empty">No captures yet. They'll appear here once the camera service runs.</div>`;
+  }
+
+  // media strip
+  const strip = $('#strip');
+  if (media.media.length) {
+    strip.innerHTML = media.media.slice(0, 8).map((m) => {
+      const isVideo = m.kind === 'sweep';
+      return `<div class="thumb" data-url="${m.url}" data-kind="${m.kind}" data-analysis="${encodeURIComponent(m.analysis || '')}" title="${m.kind}">
+        ${isVideo ? `<img src="" alt="">` : `<img src="${m.url}" alt="" loading="lazy">`}
+        <span class="badge">${m.kind}</span>
+        <span class="when">${fmtDate(m.captured_at)}</span>
+      </div>`;
+    }).join('');
+    strip.querySelectorAll('.thumb').forEach(t => t.addEventListener('click', () => {
+      const url = t.dataset.url;
+      const latest = $('#latest');
+      const isVideo = t.dataset.kind === 'sweep';
+      latest.innerHTML = `
+        <div class="shot">${isVideo ? `<video src="${url}" controls autoplay></video>` : `<img src="${url}">`}</div>
+        ${t.dataset.analysis ? `<div class="ai"><b>AI read:</b> ${decodeURIComponent(t.dataset.analysis)}</div>` : ''}`;
+      latest.scrollIntoView({ behavior: 'smooth' });
+    }));
+    // for sweep thumbs, put a play glyph
+    strip.querySelectorAll('.thumb[data-kind="sweep"] img').forEach(i => i.remove());
+    strip.querySelectorAll('.thumb[data-kind="sweep"]').forEach(t => {
+      t.innerHTML = `<span style="display:grid;place-items:center;height:100%;font-size:26px;color:#fff">▶</span><span class="badge">sweep</span>`;
+    });
+  } else {
+    strip.innerHTML = `<div class="empty-note">No captures yet.</div>`;
+  }
+
+  // harvest calendar
+  const cal = $('#calendar');
+  const planted = bed.squares.filter(s => s.planting).sort((a, b) =>
+    (a.planting.expected_harvest_at || '').localeCompare(b.planting.expected_harvest_at || ''));
+  if (planted.length) {
+    let html = `<div class="cal-list"><div class="cal-row head"><span>Square</span><span>Crop</span><span>Expected</span></div>`;
+    for (const s of planted) {
+      const p = s.planting;
+      const ready = p.expected_harvest_at && p.expected_harvest_at <= todayISO();
+      html += `<div class="cal-row">
+        <span class="sq">${s.label}</span>
+        <span class="crop">${p.ico || ''} ${p.plant_name}</span>
+        <span class="date ${ready ? 'ready' : ''}">${ready ? 'Ready' : fmtDate(p.expected_harvest_at)}</span>
+      </div>`;
+    }
+    cal.innerHTML = html + '</div>';
+  } else {
+    cal.innerHTML = `<div class="empty-note">Nothing planted yet — <a href="/edit" style="color:var(--leaf)">set up the bed</a>.</div>`;
+  }
+})();
+</script>
+</body>
+</html>

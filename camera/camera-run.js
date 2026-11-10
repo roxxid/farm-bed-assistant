@@ -1,8 +1,8 @@
-// Single-connection camera service: connect ONCE, pan, capture, pan back, close.
-// Avoids the stale-P2P-session churn of separate per-command processes.
+// Single-connection camera service: connect ONCE, recall preset, capture, return, close.
+// Uses the Eufy preset position the user saved (preset 2 = the farm bed).
 // Usage: node camera-run.js still|sweep [serial] [outdir]
 const { EufySecurity } = require('/homebridge/node_modules/@homebridge-plugins/homebridge-eufy-security/node_modules/eufy-security-client');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -13,21 +13,13 @@ const SERIAL = process.argv[3] || 'T8171T1025090F93';
 const OUTDIR = process.argv[4] || '/tmp';
 const SWEEP_FRAMES = 8;
 
-// pan/tilt: 0=rotate360 1=left 2=right 3=up 4=down
-const PAN_TO_BED = [[2, 4], [4, 3]];
-const PAN_TO_REST = [[3, 3], [1, 4]];
+// Eufy preset slots: 0=PRESET_1, 1=PRESET_2, 2=PRESET_3, 3=PRESET_4
+const PRESET_BED = 1;   // preset 2 = the farm bed
+const PRESET_REST = 0;  // preset 1 = backyard resting
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function pan(station, cam, direction, count = 1) {
-  for (let i = 0; i < count; i++) {
-    await station.panAndTilt(cam, direction);
-    console.log(`pan dir ${direction} (${i + 1}/${count})`);
-    await sleep(1800);
-  }
-}
-
-function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
+function grabFrame(driver, outPath, timeoutMs = 40000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => { cleanup(); resolve(false); }, timeoutMs);
     let ff = null;
@@ -51,9 +43,9 @@ function grabFrame(driver, station, cam, outPath, timeoutMs = 45000) {
   });
 }
 
-async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
+async function grabFrameWithRetry(driver, outPath, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
-    const ok = await grabFrame(driver, station, cam, outPath, 40000);
+    const ok = await grabFrame(driver, outPath, 40000);
     if (ok) return true;
     console.log(`frame grab attempt ${i + 1}/${attempts} failed — retrying`);
     try { await driver.stopStationLivestream(SERIAL); } catch {}
@@ -74,10 +66,18 @@ async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
   driver.setCameraMaxLivestreamDuration(120); // don't auto-stop mid-wake
   console.log('connected | station:', station.getName(), '| cam:', cam.getName());
 
-  // pan to bed
-  console.log('panning to bed...');
-  for (const [d, c] of PAN_TO_BED) await pan(station, cam, d, c);
-  await sleep(2000);
+  // CRITICAL: wait for the station P2P session to connect, else pan/preset
+  // commands are silently dropped (the camera never moves).
+  const connStart = Date.now();
+  while (!station.isConnected() && Date.now() - connStart < 30000) {
+    await sleep(500);
+  }
+  console.log('station P2P connected:', station.isConnected());
+
+  // recall the bed preset
+  console.log(`recalling bed preset (${PRESET_BED})...`);
+  await station.presetPosition(cam, PRESET_BED);
+  await sleep(5000); // let the camera physically move + settle
 
   const ts = Date.now();
   if (MODE === 'sweep') {
@@ -85,9 +85,9 @@ async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
     console.log(`capturing ${SWEEP_FRAMES} frames...`);
     for (let i = 0; i < SWEEP_FRAMES; i++) {
       const p = path.join(OUTDIR, `sweep_${ts}_f${String(i).padStart(2, '0')}.jpg`);
-      const ok = await grabFrameWithRetry(driver, station, cam, p, 2);
+      const ok = await grabFrameWithRetry(driver, p, 2);
       if (ok) frames.push(p);
-      await pan(station, cam, 2, 1); // rotate right between frames
+      await sleep(1000);
     }
     console.log(`captured ${frames.length}/${SWEEP_FRAMES} frames`);
     if (frames.length) {
@@ -100,13 +100,13 @@ async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
   } else {
     const out = path.join(OUTDIR, `still_${ts}.jpg`);
     console.log('capturing still...');
-    const ok = await grabFrameWithRetry(driver, station, cam, out);
+    const ok = await grabFrameWithRetry(driver, out);
     console.log(ok ? ('STILL_SAVED ' + out) : 'STILL_FAILED');
   }
 
-  // pan back to rest
-  console.log('panning back...');
-  for (const [d, c] of PAN_TO_REST) await pan(station, cam, d, c);
+  // return to the resting preset
+  console.log(`returning to rest preset (${PRESET_REST})...`);
+  try { await station.presetPosition(cam, PRESET_REST); } catch {}
 
   console.log('closing...');
   const killer = setTimeout(() => process.exit(0), 6000);
@@ -114,7 +114,3 @@ async function grabFrameWithRetry(driver, station, cam, outPath, attempts = 3) {
   clearTimeout(killer);
   process.exit(0);
 })().catch(e => { console.error('ERR:', e.message); process.exit(1); });
-
-function spawnSync(cmd, args) {
-  return require('child_process').spawnSync(cmd, args);
-}

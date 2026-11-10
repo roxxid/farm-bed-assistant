@@ -1,20 +1,67 @@
-"""farm-bed-assistant — FastAPI backend for the square-foot garden tracker."""
+"""farm-bed-assistant — FastAPI backend + static dashboard.
+
+Serves the square-foot-garden UI and a JSON API over a SQLite store.
+The /api/vision endpoint builds a prompt from the CURRENT grid state so the
+local Qwen2.5-VL model can identify the bed and what's planted where.
+"""
 import os
 import sqlite3
-import base64
 import json
+import base64
 import urllib.request
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 DB = os.environ.get("GARDEN_DB", "/data/garden.db")
+MEDIA_DIR = os.environ.get("MEDIA_DIR", "/data/media")
 VISION_URL = os.environ.get("VISION_URL", "http://host.docker.internal:8769/v1/chat/completions")
+STATIC_DIR = Path(__file__).parent / "static"
 
 app = FastAPI(title="farm-bed-assistant")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# ---------------------------------------------------------------------------
+# plant library (square-foot gardening data) — single source of truth
+# ---------------------------------------------------------------------------
+PLANTS = {
+    "tomato":      {"name": "Tomato",      "ico": "🍅", "per": 1,  "days": 80,  "sun": "full",    "water": "high",   "trellis": True,  "grp": "Fruiting",  "comp": "Basil, marigold, chives"},
+    "pepper":      {"name": "Pepper",      "ico": "🌶️", "per": 1,  "days": 75,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Fruiting",  "comp": "Basil, onion"},
+    "eggplant":    {"name": "Eggplant",    "ico": "🍆", "per": 1,  "days": 80,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Fruiting",  "comp": "Beans, marigold"},
+    "cucumber":    {"name": "Cucumber",    "ico": "🥒", "per": 2,  "days": 60,  "sun": "full",    "water": "high",   "trellis": True,  "grp": "Fruiting",  "comp": "Beans, radish"},
+    "cantaloupe":  {"name": "Cantaloupe",  "ico": "🍈", "per": 1,  "days": 85,  "sun": "full",    "water": "high",   "trellis": True,  "grp": "Fruiting",  "comp": "Marigold"},
+    "peas":        {"name": "Peas",        "ico": "🫛", "per": 8,  "days": 60,  "sun": "full",    "water": "medium", "trellis": True,  "grp": "Legumes",   "comp": "Carrot, radish"},
+    "beans":       {"name": "Bush beans",  "ico": "🫘", "per": 9,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Legumes",   "comp": "Carrot, eggplant"},
+    "broccoli":    {"name": "Broccoli",    "ico": "🥦", "per": 1,  "days": 70,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Brassica",  "comp": "Onion, dill"},
+    "cauliflower": {"name": "Cauliflower", "ico": "🥬", "per": 1,  "days": 65,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Brassica",  "comp": "Onion, celery"},
+    "cabbage":     {"name": "Cabbage",     "ico": "🥬", "per": 1,  "days": 90,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Brassica",  "comp": "Onion, dill"},
+    "kale":        {"name": "Kale",        "ico": "🥬", "per": 4,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Brassica",  "comp": "Onion, beet"},
+    "lettuce":     {"name": "Lettuce",     "ico": "🥬", "per": 4,  "days": 45,  "sun": "partial", "water": "medium", "trellis": False, "grp": "Leafy",     "comp": "Carrot, radish"},
+    "spinach":     {"name": "Spinach",     "ico": "🍃", "per": 9,  "days": 40,  "sun": "partial", "water": "medium", "trellis": False, "grp": "Leafy",     "comp": "Strawberry, pea"},
+    "onion":       {"name": "Onion",       "ico": "🧅", "per": 16, "days": 100, "sun": "full",    "water": "low",    "trellis": False, "grp": "Root",      "comp": "Carrot, lettuce"},
+    "carrot":      {"name": "Carrot",      "ico": "🥕", "per": 16, "days": 70,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Root",      "comp": "Onion, pea"},
+    "beet":        {"name": "Beet",        "ico": "🫜", "per": 9,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Root",      "comp": "Onion, kale"},
+    "radish":      {"name": "Radish",      "ico": "🫜", "per": 16, "days": 25,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Root",      "comp": "Carrot, cucumber"},
+    "garlic":      {"name": "Garlic",      "ico": "🧄", "per": 9,  "days": 210, "sun": "full",    "water": "low",    "trellis": False, "grp": "Root",      "comp": "Tomato, pepper", "perennial": True},
+    "basil":       {"name": "Basil",       "ico": "🌿", "per": 4,  "days": 55,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Tomato, pepper"},
+    "chives":      {"name": "Chives",      "ico": "🌿", "per": 16, "days": 60,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Herb",      "comp": "Carrot, tomato"},
+    "lemongrass":  {"name": "Lemongrass",  "ico": "🌾", "per": 1,  "days": 90,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Herb",      "comp": "Most vegetables"},
+    "rhubarb":     {"name": "Rhubarb",     "ico": "🌿", "per": 1,  "days": 365, "sun": "full",    "water": "medium", "trellis": False, "grp": "Perennial", "comp": "Permanent bed", "perennial": True},
+    "strawberry":  {"name": "Strawberry",  "ico": "🍓", "per": 4,  "days": 90,  "sun": "full",    "water": "medium", "trellis": False, "grp": "Fruiting",  "comp": "Spinach, lettuce", "perennial": True},
+    "marigold":    {"name": "Marigold",    "ico": "🌼", "per": 4,  "days": 50,  "sun": "full",    "water": "low",    "trellis": False, "grp": "Flower",    "comp": "Tomato, everything", "companion": True},
+}
+
+RECOMMENDED = [
+    "tomato", "tomato", "peas", "peas", "cantaloupe", "cantaloupe",
+    "pepper", "pepper", "eggplant", "eggplant", "beans", "beans",
+    "broccoli", "cauliflower", "cauliflower", "cabbage", "kale", "kale",
+    "lettuce", "lettuce", "lettuce", "spinach", "spinach", "rhubarb",
+    "onion", "onion", "carrot", "carrot", "beet", "garlic",
+    "basil", "basil", "lemongrass", "chives", "marigold", "radish",
+]
 
 
 def db():
@@ -24,151 +71,249 @@ def db():
     return conn
 
 
-@app.on_event("startup")
-def _init():
-    schema = os.path.join(os.path.dirname(__file__), "..", "schema.sql")
-    if os.path.exists(schema):
-        conn = db()
-        conn.executescript(open(schema).read())
-        # seed the bed + 36 squares if empty
-        if conn.execute("SELECT COUNT(*) c FROM bed").fetchone()["c"] == 0:
-            conn.execute("INSERT INTO bed (id) VALUES (1)")
-        if conn.execute("SELECT COUNT(*) c FROM squares").fetchone()["c"] == 0:
-            rows = conn.execute("SELECT rows, cols FROM bed WHERE id=1").fetchone()
-            for r in range(rows["rows"]):
-                for c in range(rows["cols"]):
-                    label = chr(ord("A") + r) + str(c + 1)
-                    conn.execute("INSERT INTO squares (row, col, label) VALUES (?,?,?)", (r, c, label))
-        conn.commit()
-        conn.close()
-
-
-# ---------- bed ----------
-@app.get("/bed")
-def get_bed():
-    return dict(db().execute("SELECT * FROM bed WHERE id=1").fetchone())
-
-
-# ---------- squares ----------
-@app.get("/squares")
-def list_squares():
-    rows = db().execute("""
-        SELECT s.*, p.id AS planting_id, pl.name AS plant_name, pl.days_to_maturity,
-               p.planted_at, p.status
-        FROM squares s
-        LEFT JOIN plantings p ON p.id = (SELECT id FROM plantings WHERE square_id=s.id ORDER BY id DESC LIMIT 1)
-        LEFT JOIN plant_library pl ON pl.id = p.plant_id
-        ORDER BY s.row, s.col
-    """).fetchall()
-    return [dict(r) for r in rows]
-
-
-# ---------- plant library ----------
-@app.get("/plants")
-def list_plants():
-    return [dict(r) for r in db().execute("SELECT * FROM plant_library ORDER BY name").fetchall()]
-
-
-class PlantIn(BaseModel):
-    name: str
-    variety: str | None = None
-    plants_per_sqft: int | None = None
-    days_to_maturity: int | None = None
-    sun_requirement: str | None = None
-    water_need: str | None = None
-    notes: str | None = None
-
-
-@app.post("/plants")
-def add_plant(p: PlantIn):
+def init_db():
+    schema = Path(__file__).parent / "schema.sql"
     conn = db()
-    cur = conn.execute(
-        "INSERT INTO plant_library (name, variety, plants_per_sqft, days_to_maturity, sun_requirement, water_need, notes) VALUES (?,?,?,?,?,?,?)",
-        (p.name, p.variety, p.plants_per_sqft, p.days_to_maturity, p.sun_requirement, p.water_need, p.notes),
-    )
+    if schema.exists():
+        conn.executescript(schema.read_text())
+    if conn.execute("SELECT COUNT(*) c FROM bed").fetchone()["c"] == 0:
+        conn.execute("INSERT INTO bed (id) VALUES (1)")
+    if conn.execute("SELECT COUNT(*) c FROM squares").fetchone()["c"] == 0:
+        r = conn.execute("SELECT rows, cols FROM bed WHERE id=1").fetchone()
+        for row in range(r["rows"]):
+            for col in range(r["cols"]):
+                label = chr(ord("A") + row) + str(col + 1)
+                conn.execute("INSERT INTO squares (row, col, label) VALUES (?,?,?)", (row, col, label))
     conn.commit()
-    return {"id": cur.lastrowid}
+    conn.close()
 
 
-# ---------- plantings ----------
-class PlantingIn(BaseModel):
-    square_id: int
-    plant_id: int
+def plant_key_from_name(name):
+    for k, v in PLANTS.items():
+        if v["name"] == name:
+            return k
+    return None
+
+
+def current_planting(conn, square_id):
+    return conn.execute(
+        "SELECT p.id AS pid, p.planted_at, p.expected_harvest_at, p.status, pl.name AS plant_name "
+        "FROM plantings p JOIN plant_library pl ON pl.id = p.plant_id "
+        "WHERE p.square_id = ? AND p.status != 'harvested' "
+        "ORDER BY p.id DESC LIMIT 1", (square_id,)
+    ).fetchone()
+
+
+def get_grid_state(conn):
+    squares = conn.execute("SELECT * FROM squares ORDER BY row, col").fetchall()
+    out = []
+    for s in squares:
+        p = current_planting(conn, s["id"])
+        planting = None
+        if p:
+            key = plant_key_from_name(p["plant_name"])
+            info = PLANTS.get(key, {})
+            planting = {
+                "id": p["pid"], "plant_key": key, "plant_name": p["plant_name"],
+                "ico": info.get("ico"), "per": info.get("per"), "days": info.get("days"),
+                "sun": info.get("sun"), "water": info.get("water"),
+                "trellis": info.get("trellis"), "grp": info.get("grp"), "comp": info.get("comp"),
+                "planted_at": p["planted_at"], "expected_harvest_at": p["expected_harvest_at"],
+                "status": p["status"],
+            }
+        out.append({
+            "id": s["id"], "row": s["row"], "col": s["col"], "label": s["label"],
+            "planting": planting,
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# startup
+# ---------------------------------------------------------------------------
+@app.on_event("startup")
+def _startup():
+    init_db()
+    Path(MEDIA_DIR).mkdir(parents=True, exist_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# API
+# ---------------------------------------------------------------------------
+@app.get("/api/plants")
+def api_plants():
+    return {"plants": PLANTS, "recommended": RECOMMENDED}
+
+
+@app.get("/api/bed")
+def api_bed():
+    conn = db()
+    bed = dict(conn.execute("SELECT * FROM bed WHERE id=1").fetchone())
+    squares = get_grid_state(conn)
+    conn.close()
+    return {"bed": bed, "squares": squares}
+
+
+class PlantSquare(BaseModel):
+    plant_key: str
     planted_at: str | None = None
 
 
-@app.post("/plantings")
-def add_planting(p: PlantingIn):
+@app.post("/api/squares/{square_id}/plant")
+def plant_square(square_id: int, body: PlantSquare):
+    if body.plant_key not in PLANTS:
+        raise HTTPException(404, "unknown plant")
     conn = db()
-    plant = conn.execute("SELECT days_to_maturity FROM plant_library WHERE id=?", (p.plant_id,)).fetchone()
-    if not plant:
-        raise HTTPException(404, "plant not found")
-    planted = p.planted_at or datetime.utcnow().isoformat()
-    expected = None
-    if plant["days_to_maturity"]:
-        expected = (datetime.fromisoformat(planted) + timedelta(days=plant["days_to_maturity"])).isoformat()
+    sq = conn.execute("SELECT * FROM squares WHERE id=?", (square_id,)).fetchone()
+    if not sq:
+        conn.close()
+        raise HTTPException(404, "square not found")
+    conn.execute("UPDATE plantings SET status='harvested' WHERE square_id=? AND status!='harvested'", (square_id,))
+    planted = body.planted_at or datetime.utcnow().date().isoformat()
+    days = PLANTS[body.plant_key]["days"]
+    expected = (datetime.fromisoformat(planted) + timedelta(days=days)).date().isoformat()
+    name = PLANTS[body.plant_key]["name"]
+    conn.execute("INSERT OR IGNORE INTO plant_library (name) VALUES (?)", (name,))
+    pid = conn.execute("SELECT id FROM plant_library WHERE name=?", (name,)).fetchone()["id"]
     cur = conn.execute(
         "INSERT INTO plantings (square_id, plant_id, planted_at, expected_harvest_at) VALUES (?,?,?,?)",
-        (p.square_id, p.plant_id, planted, expected),
+        (square_id, pid, planted, expected),
     )
     conn.commit()
-    return {"id": cur.lastrowid, "expected_harvest_at": expected}
+    conn.close()
+    return {"ok": True, "planting_id": cur.lastrowid, "expected_harvest_at": expected}
 
 
-# ---------- logs ----------
-class LogIn(BaseModel):
-    square_id: int | None = None
-    kind: str
-    value: str | None = None
-    detail: str | None = None
-
-
-@app.post("/logs")
-def add_log(l: LogIn):
+@app.delete("/api/squares/{square_id}/plant")
+def clear_square(square_id: int):
     conn = db()
-    cur = conn.execute("INSERT INTO logs (square_id, kind, value, detail) VALUES (?,?,?,?)",
-                       (l.square_id, l.kind, l.value, l.detail))
+    conn.execute("UPDATE plantings SET status='harvested' WHERE square_id=? AND status!='harvested'", (square_id,))
     conn.commit()
-    return {"id": cur.lastrowid}
+    conn.close()
+    return {"ok": True}
 
 
-# ---------- harvest (triggers soil-rest) ----------
 class HarvestIn(BaseModel):
-    planting_id: int
-    yield_qty: float | None = None
-    yield_unit: str | None = None
-    notes: str | None = None
+    harvested_at: str | None = None
 
 
-@app.post("/harvests")
-def add_harvest(h: HarvestIn):
+@app.post("/api/plantings/{planting_id}/harvest")
+def harvest_planting(planting_id: int, body: HarvestIn):
+    """Mark a planting harvested (records the actual harvest date)."""
     conn = db()
-    planting = conn.execute("SELECT square_id FROM plantings WHERE id=?", (h.planting_id,)).fetchone()
-    if not planting:
+    p = conn.execute("SELECT square_id FROM plantings WHERE id=?", (planting_id,)).fetchone()
+    if not p:
+        conn.close()
         raise HTTPException(404, "planting not found")
-    cur = conn.execute("INSERT INTO harvests (planting_id, yield_qty, yield_unit, notes) VALUES (?,?,?,?)",
-                       (h.planting_id, h.yield_qty, h.yield_unit, h.notes))
-    # mark the planting harvested + the square needs compost refresh
-    conn.execute("UPDATE plantings SET status='harvested' WHERE id=?", (h.planting_id,))
-    conn.execute("INSERT INTO logs (square_id, kind, value) VALUES (?, 'soil', 'compost-refresh-due')",
-                 (planting["square_id"],))
+    when = body.harvested_at or datetime.utcnow().date().isoformat()
+    conn.execute("INSERT INTO harvests (planting_id, harvested_at) VALUES (?,?)", (planting_id, when))
+    conn.execute("UPDATE plantings SET status='harvested' WHERE id=?", (planting_id,))
+    conn.execute("INSERT INTO logs (square_id, kind, value) VALUES (?, 'soil', 'compost-refresh-due')", (p["square_id"],))
     conn.commit()
-    return {"id": cur.lastrowid, "soil_action": "compost-refresh-due"}
+    conn.close()
+    return {"ok": True, "harvested_at": when, "soil_action": "compost-refresh-due"}
 
 
-# ---------- vision ----------
+@app.get("/api/overview")
+def api_overview():
+    conn = db()
+    squares = get_grid_state(conn)
+    conn.close()
+    planted = [s for s in squares if s["planting"]]
+    today = datetime.utcnow().date().isoformat()
+    ready = [s for s in planted if s["planting"]["expected_harvest_at"] and s["planting"]["expected_harvest_at"] <= today]
+    upcoming = sorted(
+        [s for s in planted if s["planting"]["expected_harvest_at"] and s["planting"]["expected_harvest_at"] > today],
+        key=lambda s: s["planting"]["expected_harvest_at"],
+    )
+    next_harvest = upcoming[0]["planting"]["expected_harvest_at"] if upcoming else None
+    next_label = upcoming[0]["label"] if upcoming else None
+    return {
+        "total_squares": len(squares), "planted": len(planted),
+        "empty": len(squares) - len(planted), "ready": len(ready),
+        "next_harvest_at": next_harvest, "next_harvest_label": next_label,
+    }
+
+
 class VisionIn(BaseModel):
     image_b64: str
-    prompt: str = "Describe this garden bed image."
+    prompt: str | None = None
 
 
-@app.post("/vision")
-def analyze(v: VisionIn):
+@app.post("/api/vision")
+def api_vision(body: VisionIn):
+    """Analyze a bed image, seeded with the CURRENT grid layout + plantings."""
+    conn = db()
+    squares = get_grid_state(conn)
+    conn.close()
+    planted = [s for s in squares if s["planting"]]
+    lines = [
+        "This is a 6x6 square-foot garden bed, divided into 36 one-foot squares "
+        "labeled A1 (top-left) through F6 (bottom-right). The current planting plan is:",
+    ]
+    for s in planted:
+        p = s["planting"]
+        lines.append(f"- {s['label']}: {p['plant_name']} ({p['per']} per square, {p['days']} days to maturity)")
+    if not planted:
+        lines.append("- (nothing planted yet)")
+    lines.append(
+        "Analyze the image of this bed: identify the grid squares if visible, note which "
+        "plants you see and where, their health (green/wilting/yellowing), soil moisture "
+        "(dry/damp/wet), and sunlight vs shade. Flag any square whose contents do not match "
+        "the plan above. End with a one-word overall health rating: good, fair, or poor."
+    )
+    prompt = body.prompt or "\n".join(lines)
     payload = {"messages": [{"role": "user", "content": [
-        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{v.image_b64}"}},
-        {"type": "text", "text": v.prompt},
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{body.image_b64}"}},
+        {"type": "text", "text": prompt},
     ]}], "temperature": 0.1, "max_tokens": 400}
     req = urllib.request.Request(VISION_URL, data=json.dumps(payload).encode(),
                                  headers={"Content-Type": "application/json"})
-    r = json.loads(urllib.request.urlopen(req, timeout=180).read())
-    return {"text": r["choices"][0]["message"]["content"]}
+    try:
+        r = json.loads(urllib.request.urlopen(req, timeout=180).read())
+        return {"text": r["choices"][0]["message"]["content"], "context": prompt}
+    except Exception as e:
+        raise HTTPException(502, f"vision model error: {e}")
+
+
+@app.get("/api/media")
+def api_media():
+    out = []
+    if os.path.isdir(MEDIA_DIR):
+        for root, _dirs, files in os.walk(MEDIA_DIR):
+            for f in sorted(files):
+                if f.endswith((".jpg", ".jpeg", ".png", ".mp4")):
+                    full = os.path.join(root, f)
+                    rel = os.path.relpath(full, MEDIA_DIR)
+                    jsonside = os.path.splitext(full)[0] + ".json"
+                    analysis = None
+                    captured_at = None
+                    if os.path.exists(jsonside):
+                        try:
+                            meta = json.load(open(jsonside))
+                            analysis = meta.get("analysis")
+                            captured_at = meta.get("captured_at")
+                        except Exception:
+                            pass
+                    kind = "sweep" if f.endswith(".mp4") else "still"
+                    out.append({"path": rel, "kind": kind, "url": f"/media/{rel}",
+                                "captured_at": captured_at, "analysis": analysis})
+    out.sort(key=lambda m: m.get("captured_at") or "", reverse=True)
+    return {"media": out}
+
+
+# ---------------------------------------------------------------------------
+# static frontend
+# ---------------------------------------------------------------------------
+app.mount("/media", StaticFiles(directory=MEDIA_DIR), name="media")
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/")
+def index():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/edit")
+def edit():
+    return FileResponse(STATIC_DIR / "edit.html")
