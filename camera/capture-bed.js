@@ -1,5 +1,6 @@
-// capture-bed.js: full bed-shot flow — recall bed preset → capture → return to backyard preset.
-// usage: node capture-bed.js [serial] [outPath] [bedPreset] [backyardPreset]
+// capture-bed.js: pan LEFT to the bed → capture → pan RIGHT back to normal.
+// Verified: bed = 12 steps left (CMD_OUTDOOR_ROTATE 6038, curise_type=1) from the normal/backyard view.
+// usage: node capture-bed.js [serial] [outPath] [leftSteps] [rightSteps]
 const { EufySecurity } = require('/homebridge/node_modules/@homebridge-plugins/homebridge-eufy-security/node_modules/eufy-security-client');
 const { spawn } = require('child_process');
 const fs = require('fs');
@@ -8,11 +9,24 @@ const cfg = JSON.parse(fs.readFileSync('/homebridge/config.json', 'utf8'));
 const eufy = cfg.platforms.find(p => p.platform === 'EufySecurity');
 const SERIAL = process.argv[2] || 'T8171T1025090F93';
 const OUT = process.argv[3] || '/tmp/bed-shot.jpg';
-const BED_PRESET = parseInt(process.argv[4] || '2', 10);
-const BACKYARD_PRESET = parseInt(process.argv[5] || '1', 10);
+const LEFT_STEPS = parseInt(process.argv[4] || '12', 10);   // curise_type=1 (left) → bed
+const RIGHT_STEPS = parseInt(process.argv[5] || '12', 10);  // curise_type=2 (right) → back to normal
+
+const CMD_DOORBELL_SET_PAYLOAD = 1700;
+const CMD_OUTDOOR_ROTATE = 6038;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; console.error('UNCAUGHT:', e.message); process.exit(1); });
+
+function rotate(station, device, curise, steps, ms) {
+  for (let i = 0; i < steps; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: curise } }),
+      channel: device.getChannel(),
+    }, {});
+  }
+}
 
 function grabFrame(driver, outPath, timeoutMs = 40000) {
   return new Promise((resolve) => {
@@ -58,19 +72,32 @@ async function grabWithRetry(driver, outPath, attempts = 3) {
   console.log('station connected:', connected);
   if (!connected) { console.log('NOT CONNECTED'); process.exit(1); }
 
-  // 1. go to the bed
-  console.log(`recalling bed preset ${BED_PRESET}...`);
-  station.presetPosition(device, BED_PRESET);
-  await sleep(9000);
+  // 1. pan LEFT to the bed
+  console.log(`panning left ${LEFT_STEPS} to bed...`);
+  for (let i = 0; i < LEFT_STEPS; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: 1 } }),
+      channel: device.getChannel(),
+    }, {});
+    await sleep(500);
+  }
+  await sleep(6000);
 
-  // 2. capture the bed
+  // 2. capture
   console.log('capturing bed...');
   const ok = await grabWithRetry(driver, OUT);
 
-  // 3. return to backyard
-  console.log(`returning to backyard preset ${BACKYARD_PRESET}...`);
-  station.presetPosition(device, BACKYARD_PRESET);
-  await sleep(3000);
+  // 3. pan RIGHT back to normal (explicit; auto-return is the fallback)
+  console.log(`panning right ${RIGHT_STEPS} back to normal...`);
+  for (let i = 0; i < RIGHT_STEPS; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: 2 } }),
+      channel: device.getChannel(),
+    }, {});
+    await sleep(500);
+  }
 
   console.log(ok ? ('SAVED ' + OUT) : 'CAPTURE FAILED');
   try { await driver.close(); } catch {}

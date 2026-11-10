@@ -24,8 +24,8 @@ from datetime import datetime
 
 MEDIA_ROOT = "/mnt/user/appdata/farm-bed/media"
 SERIAL = "T8171T1025090F93"  # Backyard SoloCam E30
-BED_PRESET = 2
-BACKYARD_PRESET = 1
+BED_LEFT_STEPS = 12    # pan left (curise_type=1) from normal → bed
+BACK_RIGHT_STEPS = 12  # pan right (curise_type=2) back to normal
 ZOOM = 0.6  # crop to the central 60% (~1.7x zoom) to focus on the bed
 
 PROMPT = (
@@ -41,9 +41,9 @@ def sh(cmd, timeout=120):
 
 
 def run_camera():
-    """Recall bed preset → capture → return to backyard. Retries transient docker exec failures."""
+    """Pan left to the bed → capture → pan right back to normal. Retries transient docker exec failures."""
     cmd = (f"docker exec homebridge node /tmp/capture-bed.js {SERIAL} "
-           f"/tmp/bed-shot.jpg {BED_PRESET} {BACKYARD_PRESET}")
+           f"/tmp/bed-shot.jpg {BED_LEFT_STEPS} {BACK_RIGHT_STEPS}")
     for attempt in range(5):
         r = sh(cmd, timeout=360)
         if r.stdout:
