@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """farm-bed camera service — runs ON koli.
 
-Orchestrates: camera-run.js (pan → capture → pan back, single connection)
-→ vision-analyze the result → store in the media tree.
+Orchestrates: capture-bed.js (recall bed preset → capture → return to backyard)
+→ digital zoom (center crop) → vision-analyze → store in the media tree.
 
 Modes:
-  still   single hourly frame of the bed
-  sweep   pan across the bed capturing N frames, stitch into a clip
+  still   capture a bed shot then return the camera to the backyard
+  sweep   (pan not available) — treated as still for now
 
 Storage layout (on koli):
   /mnt/user/appdata/farm-bed/media/YYYY/MM/DD/still_HHMMSS.jpg
-  /mnt/user/appdata/farm-bed/media/YYYY/MM/DD/sweep_HHMMSS.mp4
   /mnt/user/appdata/farm-bed/media/YYYY/MM/DD/*.json   (vision analysis)
 """
 import base64
@@ -19,12 +18,15 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import urllib.request
 from datetime import datetime
 
 MEDIA_ROOT = "/mnt/user/appdata/farm-bed/media"
-VISION_URL = "http://127.0.0.1:8769/v1/chat/completions"
 SERIAL = "T8171T1025090F93"  # Backyard SoloCam E30
+BED_PRESET = 2
+BACKYARD_PRESET = 1
+ZOOM = 0.6  # crop to the central 60% (~1.7x zoom) to focus on the bed
 
 PROMPT = (
     "You are a garden monitor. Describe this raised-bed image concisely: "
@@ -38,19 +40,40 @@ def sh(cmd, timeout=120):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=timeout)
 
 
-def run_camera(mode):
-    """Capture the bed's current (default) view — no pan (the default is now the bed)."""
-    r = sh(f"docker exec homebridge node /tmp/capture-now.js {SERIAL} /tmp/capture-now.jpg", timeout=360)
-    if r.stdout:
-        print(r.stdout.strip())
-    if r.returncode != 0:
+def run_camera():
+    """Recall bed preset → capture → return to backyard. Retries transient docker exec failures."""
+    cmd = (f"docker exec homebridge node /tmp/capture-bed.js {SERIAL} "
+           f"/tmp/bed-shot.jpg {BED_PRESET} {BACKYARD_PRESET}")
+    for attempt in range(5):
+        r = sh(cmd, timeout=360)
+        if r.stdout:
+            print(r.stdout.strip())
+        if r.returncode == 0:
+            return "/tmp/bed-shot.jpg"
+        out = (r.stdout + r.stderr).strip()
+        if "OCI runtime exec failed" in out:
+            print(f"docker exec transient failure (attempt {attempt + 1}/5), retrying...")
+            time.sleep(5)
+            continue
+        print("CAMERA FAILED:", out[-300:])
         return None
-    return "/tmp/capture-now.jpg"
+    print("CAMERA FAILED after retries")
+    return None
 
 
 def pull_from_container(container_path, local_path):
-    sh(f"docker cp homebridge:{container_path} {local_path}")
-    return os.path.exists(local_path) and os.path.getsize(local_path) > 0
+    for attempt in range(5):
+        sh(f"docker cp homebridge:{container_path} {local_path}")
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+            return True
+        time.sleep(4)
+    return False
+
+
+def zoom_crop(src, dst, frac=ZOOM):
+    """Digital zoom: crop to the central `frac` of the frame (bed is centered)."""
+    r = sh(f'ffmpeg -y -loglevel error -i {src} -vf "crop=iw*{frac}:ih*{frac}" -q:v 2 {dst}')
+    return r.returncode == 0 and os.path.exists(dst) and os.path.getsize(dst) > 0
 
 
 def vision_analyze(img_path):
@@ -72,9 +95,9 @@ def day_dir():
 
 def store(local_path, kind, analysis):
     ts = datetime.now().strftime("%H%M%S")
-    ext = os.path.splitext(local_path)[1] or (".jpg" if kind == "still" else ".mp4")
+    ext = os.path.splitext(local_path)[1] or ".jpg"
     final = os.path.join(day_dir(), f"{kind}_{ts}{ext}")
-    shutil.move(local_path, final)  # shutil.move handles cross-device (/tmp -> /mnt/user)
+    shutil.move(local_path, final)  # handles cross-device (/tmp -> /mnt/user)
     meta = {"kind": kind, "path": os.path.relpath(final, MEDIA_ROOT),
             "captured_at": datetime.now().isoformat(), "analysis": analysis}
     with open(os.path.join(day_dir(), f"{kind}_{ts}.json"), "w") as f:
@@ -85,7 +108,7 @@ def store(local_path, kind, analysis):
 
 
 def mode_still():
-    container_path = run_camera("still")
+    container_path = run_camera()
     if not container_path:
         print("CAMERA FAILED")
         return 1
@@ -93,6 +116,10 @@ def mode_still():
     if not pull_from_container(container_path, local):
         print("PULL FAILED")
         return 1
+    # digital zoom to focus on the bed
+    zoomed = "/tmp/farm-still-zoom.jpg"
+    if zoom_crop(local, zoomed):
+        local = zoomed
     try:
         analysis = vision_analyze(local)
     except Exception as e:
@@ -102,21 +129,9 @@ def mode_still():
 
 
 def mode_sweep(frames=8):
-    container_clip = run_camera("sweep")
-    if not container_clip:
-        print("CAMERA SWEEP FAILED")
-        return 1
-    local = "/tmp/farm-sweep.mp4"
-    if not pull_from_container(container_clip, local):
-        print("PULL FAILED")
-        return 1
-    sh(f"ffmpeg -y -loglevel error -i {local} -frames:v 1 /tmp/farm-sweep-still.jpg")
-    try:
-        analysis = vision_analyze("/tmp/farm-sweep-still.jpg")
-    except Exception as e:
-        analysis = f"vision error: {e}"
-    store(local, "sweep", analysis)
-    return 0
+    # pan-based sweep not available (E30 pan is preset/rotate only); fall back to a still
+    print("sweep unsupported on E30 — capturing a still instead")
+    return mode_still()
 
 
 if __name__ == "__main__":
