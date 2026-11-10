@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Farm Bed — Edit</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,10 +11,7 @@
 </head>
 <body>
   <div class="topbar">
-    <div class="brand">
-      <h1>Farm Bed</h1>
-      <span class="sub">edit the bed</span>
-    </div>
+    <div class="brand"><h1>Farm Bed</h1><span class="sub">edit</span></div>
     <div class="spacer"></div>
     <nav class="nav">
       <a href="/">Overview</a>
@@ -24,11 +21,11 @@
     <div class="weather">
       <div class="chip temp"><span class="dot"></span><span class="lbl">Temp</span><span class="val" id="chipTemp">—</span></div>
       <div class="chip sun"><span class="dot"></span><span class="lbl">Sun</span><span class="val" id="chipSun">—</span></div>
-      <div class="chip water"><span class="dot"></span><span class="lbl">Moisture</span><span class="val" id="chipMoist">—</span></div>
+      <div class="chip water"><span class="dot"></span><span class="lbl">Moist</span><span class="val" id="chipMoist">—</span></div>
     </div>
   </div>
 
-  <div class="layout">
+  <div class="layout-desktop">
     <aside class="palette">
       <div class="palette-head">Seed Library <span class="hint">drag onto a square</span></div>
       <div id="paletteGroups"></div>
@@ -47,13 +44,21 @@
       <div class="legend">
         <span><span class="swatch s-ready"></span> ready to harvest</span>
         <span><span class="swatch s-soil"></span> empty square</span>
-        <span>click a square to edit · drag a seed to plant</span>
+        <span>tap a square to edit</span>
       </div>
       <div id="calendar"></div>
     </main>
 
     <aside class="inspector" id="inspector"></aside>
   </div>
+
+  <div class="sheet-backdrop" id="sheetBackdrop"></div>
+  <div class="sheet" id="sheet"></div>
+
+  <nav class="bottomnav">
+    <a href="/"><span class="ic">▦</span>Overview</a>
+    <a href="/edit" class="active"><span class="ic">✎</span>Edit</a>
+  </nav>
 
 <script src="/static/app.js"></script>
 <script>
@@ -65,8 +70,8 @@ let selected = null;
 const GROUP_ORDER = ['Fruiting','Legumes','Brassica','Leafy','Root','Herb','Perennial','Flower'];
 const GROUP_LABEL = { Fruiting:'Fruiting (tall / trellis)', Legumes:'Legumes', Brassica:'Brassicas', Leafy:'Leafy greens', Root:'Roots & bulbs', Herb:'Herbs', Perennial:'Perennials', Flower:'Companion flowers' };
 
-function rowCol(i) { return { r: Math.floor(i/6)+1, c: (i%6)+1 }; }
-function label(i) { const {r,c} = rowCol(i); return String.fromCharCode(64+r)+c; }
+function isDesktop() { return window.matchMedia('(min-width: 900px)').matches; }
+function label(i) { const r = Math.floor(i/6)+1, c = (i%6)+1; return String.fromCharCode(64+r)+c; }
 
 async function reload() {
   const bed = await API.get('/api/bed');
@@ -87,11 +92,9 @@ function renderPalette() {
       const el = document.createElement('div');
       el.className = 'seed'; el.draggable = true; el.dataset.plant = key;
       el.innerHTML = `<div class="ico">${p.ico}</div>
-        <div class="meta"><div class="name">${p.name}</div>
-        <div class="spec"><span>${p.per}/sqft</span><span>·</span><span>${p.days}d</span></div></div>
+        <div class="meta"><div class="name">${p.name}</div><div class="spec">${p.per}/sqft · ${p.days}d</div></div>
         <div class="drag-handle">⠿</div>`;
-      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plant', key); el.classList.add('dragging'); });
-      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+      el.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plant', key); });
       div.appendChild(el);
     }
     wrap.appendChild(div);
@@ -105,43 +108,43 @@ function renderBed() {
     const cell = document.createElement('div');
     const p = s.planting;
     cell.className = 'cell' + (p ? ' filled' : ' empty') + (selected === i ? ' selected' : '');
-    const ready = p && p.expected_harvest_at && p.expected_harvest_at <= todayISO();
-    if (ready) cell.classList.add('ready');
+    if (p && p.expected_harvest_at && p.expected_harvest_at <= todayISO()) cell.classList.add('ready');
     cell.innerHTML = p
       ? `<span class="idx">${s.label}</span><span class="ico">${p.ico}</span><span class="cname">${p.plant_name}</span><span class="cden">×${p.per}</span>`
       : `<span class="idx">${s.label}</span><span class="plus">＋</span>`;
-    cell.addEventListener('click', () => { selected = i; renderBed(); renderInspector(); });
+    cell.addEventListener('click', () => { selected = i; renderBed(); openSquare(i); });
     cell.addEventListener('dragover', (e) => { e.preventDefault(); cell.classList.add('drag-over'); });
     cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
     cell.addEventListener('drop', async (e) => {
       e.preventDefault(); cell.classList.remove('drag-over');
       const plant = e.dataTransfer.getData('text/plant');
-      if (plant && PLANTS[plant]) {
-        await API.post(`/api/squares/${s.id}/plant`, { plant_key: plant, planted_at: todayISO() });
-        await reload();
-      }
+      if (plant && PLANTS[plant]) { await API.post(`/api/squares/${s.id}/plant`, { plant_key: plant, planted_at: todayISO() }); await reload(); }
     });
     bed.appendChild(cell);
   });
   const used = SQUARES.filter(s => s.planting).length;
-  $('#bedMeta').textContent = `${used} / ${SQUARES.length} squares planted`;
+  $('#bedMeta').textContent = `${used} / ${SQUARES.length} planted`;
 }
 
-function renderInspector() {
-  const ins = $('#inspector');
-  if (selected === null || !SQUARES[selected] || !SQUARES[selected].planting) {
-    ins.innerHTML = `<div class="insp-empty"><div class="big">🌱</div>Click a square to see its plan, or drag a seed from the library onto the bed.</div>`;
-    return;
-  }
-  const s = SQUARES[selected];
+/* ---------- bottom sheet + desktop inspector ---------- */
+function sheetHTML(i) {
+  const s = SQUARES[i];
   const p = s.planting;
-  const ready = p.expected_harvest_at && p.expected_harvest_at <= todayISO();
-  ins.innerHTML = `
-    <div class="insp-body">
-      <div class="insp-head">
-        <div class="ico">${p.ico}</div>
-        <div><div class="t">${p.plant_name}</div><div class="s">Square ${s.label} · row ${s.row+1}, col ${s.col+1}</div></div>
-      </div>
+  const head = `
+    <div class="sheet-head">
+      <div class="ico">${p ? p.ico : '＋'}</div>
+      <div><div class="t">${p ? p.plant_name : 'Plant ' + s.label}</div><div class="s">Square ${s.label} · ${p ? '' : 'pick a crop'}</div></div>
+      <button class="sheet-close" id="sheetClose">✕</button>
+    </div>`;
+  const picker = `<div class="sheet-section-title">Choose a plant</div><div class="picker">${
+    Object.entries(PLANTS).map(([key, pl]) =>
+      `<div class="opt" data-plant="${key}"><span class="pico">${pl.ico}</span><span class="pname">${pl.name}</span><span class="pspec">${pl.per}/sq</span></div>`
+    ).join('')
+  }</div>`;
+  let details = '';
+  if (p) {
+    const ready = p.expected_harvest_at && p.expected_harvest_at <= todayISO();
+    details = `
       <div class="harvest-badge ${ready ? 'ready' : 'growing'}">${ready ? '● Ready to harvest' : '● Growing'} — expected ${fmtDate(p.expected_harvest_at)}</div>
       <div class="need">
         <span class="tag density">${p.per} per square</span>
@@ -150,24 +153,66 @@ function renderInspector() {
         ${p.trellis ? '<span class="tag water">Trellis</span>' : ''}
       </div>
       <div class="field"><label>Planted</label><input type="date" value="${p.planted_at || ''}" id="fPlant"></div>
-      <div class="field"><label>Expected harvest</label><input type="date" value="${p.expected_harvest_at || ''}" readonly><span class="auto">auto = plant date + ${p.days} days to maturity</span></div>
-      <div class="comp"><b>Companions:</b> ${p.comp}. ${PLANTS[p.plant_key]?.perennial ? '<b>Perennial</b> — keep reserved; it does not rotate.' : ''}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost" id="btnHarvest" style="color:var(--leaf)">✓ Mark harvested</button>
-        <button class="btn ghost" id="btnRemove" style="color:var(--danger)">Remove</button>
-      </div>
-    </div>`;
+      <div class="field"><label>Expected harvest</label><input type="date" value="${p.expected_harvest_at || ''}" readonly><span class="auto">auto = plant date + ${p.days} days</span></div>
+      <div class="comp"><b>Companions:</b> ${p.comp}. ${PLANTS[p.plant_key]?.perennial ? '<b>Perennial</b> — keep reserved.' : ''}</div>
+      <div class="sheet-actions">
+        <button class="btn" id="btnHarvest" style="color:var(--leaf)">✓ Harvested</button>
+        <button class="btn" id="btnRemove" style="color:var(--danger)">Remove</button>
+      </div>`;
+  }
+  return head + `<div class="sheet-body">${picker}${details}</div>`;
+}
 
-  $('#fPlant').addEventListener('change', async (e) => {
-    await API.post(`/api/squares/${s.id}/plant`, { plant_key: p.plant_key, planted_at: e.target.value });
-    await reload();
+function openSquare(i) {
+  const s = SQUARES[i];
+  if (isDesktop()) { renderInspector(); return; }
+  const sheet = $('#sheet');
+  const backdrop = $('#sheetBackdrop');
+  sheet.innerHTML = `<div class="grab"></div>` + sheetHTML(i);
+  sheet.classList.add('open');
+  backdrop.classList.add('open');
+  const close = () => { sheet.classList.remove('open'); backdrop.classList.remove('open'); };
+  $('#sheetClose').addEventListener('click', close);
+  backdrop.addEventListener('click', close);
+  sheet.querySelectorAll('.picker .opt').forEach(opt => opt.addEventListener('click', async () => {
+    await API.post(`/api/squares/${s.id}/plant`, { plant_key: opt.dataset.plant, planted_at: todayISO() });
+    await reload(); close();
+  }));
+  const btnRemove = $('#btnRemove');
+  if (btnRemove) btnRemove.addEventListener('click', async () => { await API.del(`/api/squares/${s.id}/plant`); await reload(); close(); });
+  const btnHarvest = $('#btnHarvest');
+  if (btnHarvest) btnHarvest.addEventListener('click', async () => {
+    try { await API.post(`/api/plantings/${s.planting.id}/harvest`, { harvested_at: todayISO() }); } catch {}
+    await reload(); close();
   });
-  $('#btnRemove').addEventListener('click', async () => { await API.del(`/api/squares/${s.id}/plant`); await reload(); });
-  $('#btnHarvest').addEventListener('click', async () => {
-    try { await API.post(`/api/plantings/${p.id}/harvest`, { harvested_at: todayISO() }); }
-    catch { /* endpoint added below */ }
-    await reload();
+  const fPlant = $('#fPlant');
+  if (fPlant) fPlant.addEventListener('change', async (e) => {
+    await API.post(`/api/squares/${s.id}/plant`, { plant_key: s.planting.plant_key, planted_at: e.target.value });
+    await reload(); close();
   });
+}
+
+function renderInspector() {
+  const ins = $('#inspector');
+  if (!ins) return;
+  if (selected === null || !SQUARES[selected] || !SQUARES[selected].planting) {
+    ins.innerHTML = `<div class="insp-empty"><div class="big">🌱</div>Click a square to edit, or drag a seed from the library.</div>`;
+    return;
+  }
+  const s = SQUARES[selected], p = s.planting;
+  const ready = p.expected_harvest_at && p.expected_harvest_at <= todayISO();
+  ins.innerHTML = `<div style="padding:18px 20px;display:flex;flex-direction:column;gap:14px">
+    <div class="sheet-head" style="padding:0"><div class="ico">${p.ico}</div><div><div class="t">${p.plant_name}</div><div class="s">Square ${s.label}</div></div></div>
+    <div class="harvest-badge ${ready?'ready':'growing'}">${ready?'● Ready to harvest':'● Growing'} — expected ${fmtDate(p.expected_harvest_at)}</div>
+    <div class="need"><span class="tag density">${p.per}/sqft</span><span class="tag sun">${p.sun==='full'?'Full sun':'Partial shade'}</span><span class="tag water">${p.water}</span>${p.trellis?'<span class="tag water">Trellis</span>':''}</div>
+    <div class="field"><label>Planted</label><input type="date" value="${p.planted_at||''}" id="dPlant"></div>
+    <div class="field"><label>Expected harvest</label><input type="date" value="${p.expected_harvest_at||''}" readonly></div>
+    <div class="comp"><b>Companions:</b> ${p.comp}</div>
+    <div class="sheet-actions"><button class="btn" id="dHarvest" style="color:var(--leaf)">✓ Harvested</button><button class="btn" id="dRemove" style="color:var(--danger)">Remove</button></div>
+  </div>`;
+  $('#dPlant').addEventListener('change', async (e) => { await API.post(`/api/squares/${s.id}/plant`, { plant_key: p.plant_key, planted_at: e.target.value }); await reload(); });
+  $('#dRemove').addEventListener('click', async () => { await API.del(`/api/squares/${s.id}/plant`); await reload(); });
+  $('#dHarvest').addEventListener('click', async () => { try { await API.post(`/api/plantings/${p.id}/harvest`, { harvested_at: todayISO() }); } catch {} await reload(); });
 }
 
 function renderCalendar() {
