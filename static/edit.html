@@ -354,7 +354,7 @@ document.querySelectorAll('.dpad .dp').forEach(btn => btn.addEventListener('clic
   setCamBusy(true);
   camStatus(`moving ${dir}… (this takes ~30s)`);
   try {
-    await API.post('/api/camera/move', { direction: dir, steps: 1 });
+    await API.post('/api/camera/move', { direction: dir, steps: 2 });
     camStatus(`moved ${dir} — tap 📸 to see`);
   } catch (e) {
     camStatus(`move failed: ${e}`);
