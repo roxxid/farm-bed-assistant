@@ -39,12 +39,12 @@ function grabFrame(driver, outPath, timeoutMs = 40000) {
   });
 }
 
-async function grabWithRetry(driver, outPath, attempts = 3) {
+async function grabWithRetry(driver, outPath, attempts = 5) {
   for (let i = 0; i < attempts; i++) {
     if (await grabFrame(driver, outPath)) return true;
     console.log(`attempt ${i + 1}/${attempts} failed — retrying`);
     try { await driver.stopStationLivestream(SERIAL); } catch {}
-    await sleep(5000);
+    await sleep(8000);
   }
   return false;
 }

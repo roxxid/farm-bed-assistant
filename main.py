@@ -354,13 +354,16 @@ def camera_preset(body: CamPreset):
 
 @app.post("/api/camera/snapshot")
 def camera_snapshot():
-    """Grab a fresh frame from the camera's current view + serve it."""
-    code, out = _run_cam("/tmp/capture-now.js", CAM_SERIAL, "/tmp/snap.jpg")
-    if code != 0:
-        raise HTTPException(502, f"capture failed: {out.strip()[-200:]}")
-    subprocess.run(["docker", "cp", "homebridge:/tmp/snap.jpg", "/data/media/live-snap.jpg"],
-                   capture_output=True, timeout=60)
-    return {"url": f"/media/live-snap.jpg?v={int(time.time())}"}
+    """Grab a fresh frame from the camera's current view + serve it (retries once)."""
+    out = ""
+    for attempt in range(2):
+        code, out = _run_cam("/tmp/capture-now.js", CAM_SERIAL, "/tmp/snap.jpg")
+        if code == 0:
+            subprocess.run(["docker", "cp", "homebridge:/tmp/snap.jpg", "/data/media/live-snap.jpg"],
+                           capture_output=True, timeout=60)
+            return {"url": f"/media/live-snap.jpg?v={int(time.time())}"}
+        time.sleep(4)
+    raise HTTPException(502, f"capture failed: {out.strip()[-200:]}")
 
 
 @app.post("/api/camera/save-preset")

@@ -341,19 +341,30 @@ setInterval(() => {
 }, 60000);
 
 /* ---------- camera pan/tilt controls ---------- */
+let camBusy = false;
+const camBtns = () => [...document.querySelectorAll('.dpad .dp, #btnSnap, #btnSaveBed, #btnRefresh')];
+const setCamBusy = (b) => {
+  camBusy = b;
+  camBtns().forEach(x => x.disabled = b);
+};
 const camStatus = (msg) => { $('#camStatus').textContent = msg; };
 document.querySelectorAll('.dpad .dp').forEach(btn => btn.addEventListener('click', async () => {
+  if (camBusy) return;
   const dir = btn.dataset.dir;
-  camStatus(`moving ${dir}…`);
+  setCamBusy(true);
+  camStatus(`moving ${dir}… (this takes ~30s)`);
   try {
     await API.post('/api/camera/move', { direction: dir, steps: 1 });
     camStatus(`moved ${dir} — tap 📸 to see`);
   } catch (e) {
     camStatus(`move failed: ${e}`);
   }
+  setCamBusy(false);
 }));
 $('#btnSnap').addEventListener('click', async () => {
-  camStatus('capturing…');
+  if (camBusy) return;
+  setCamBusy(true);
+  camStatus('capturing… (up to ~60s)');
   try {
     const r = await API.post('/api/camera/snapshot', {});
     const img = document.createElement('img');
@@ -366,8 +377,11 @@ $('#btnSnap').addEventListener('click', async () => {
   } catch (e) {
     camStatus(`capture failed: ${e}`);
   }
+  setCamBusy(false);
 });
 $('#btnSaveBed').addEventListener('click', async () => {
+  if (camBusy) return;
+  setCamBusy(true);
   camStatus('saving bed position…');
   try {
     await API.post('/api/camera/save-preset', { preset: 'bed' });
@@ -375,6 +389,7 @@ $('#btnSaveBed').addEventListener('click', async () => {
   } catch (e) {
     camStatus(`save failed: ${e}`);
   }
+  setCamBusy(false);
 });
 </script>
 </body>
