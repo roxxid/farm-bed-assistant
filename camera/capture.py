@@ -25,7 +25,9 @@ from datetime import datetime
 MEDIA_ROOT = "/mnt/user/appdata/farm-bed/media"
 SERIAL = "T8171T1025090F93"  # Backyard SoloCam E30
 SWEEP_FRAMES = 26   # frames captured across the 360° rotation
-BED_FRAME = 18      # the frame where the bed is fully centered (verified via sweep)
+BED_FRAME = 18      # the frame where the bed lands (full view)
+TILT_DOWN = 3       # tilt-down steps (curise_type=4) to center the bed vertically
+PAN_LEFT = 1        # extra pan-left steps (curise_type=1) to center horizontally
 ZOOM = 0.6  # crop to the central 60% (~1.7x zoom) to focus on the bed
 
 PROMPT = (
@@ -42,7 +44,7 @@ def sh(cmd, timeout=120):
 
 def run_camera():
     """Rotate the camera (360° sweep) + capture frames; return the bed frame. Retries docker exec."""
-    cmd = f"docker exec homebridge node /tmp/sweep.js {SERIAL} /tmp/sweep {SWEEP_FRAMES}"
+    cmd = f"docker exec homebridge node /tmp/sweep.js {SERIAL} /tmp/sweep {SWEEP_FRAMES} {TILT_DOWN} {PAN_LEFT}"
     for attempt in range(5):
         r = sh(cmd, timeout=360)
         if r.stdout:

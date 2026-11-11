@@ -10,6 +10,8 @@ const eufy = cfg.platforms.find(p => p.platform === 'EufySecurity');
 const SERIAL = process.argv[2] || 'T8171T1025090F93';
 const OUTDIR = process.argv[3] || '/tmp/sweep';
 const FRAMES = parseInt(process.argv[4] || '14', 10);
+const TILT_DOWN = parseInt(process.argv[5] || '3', 10);  // curise_type=4 (tilt down) steps to center vertically
+const PAN_LEFT = parseInt(process.argv[6] || '1', 10);   // curise_type=1 (pan left) extra steps to center horizontally
 
 const CMD_DOORBELL_SET_PAYLOAD = 1700;
 const CMD_OUTDOOR_ROTATE = 6038;
@@ -54,8 +56,28 @@ process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; co
     driver.startStationLivestream(SERIAL).then(() => {}).catch(() => { clearTimeout(timer); resolve(); });
   });
 
-  // wait for the stream to spin up, then start the rotation
-  await sleep(3000);
+  // wait for the stream to spin up, then tilt down to center the bed vertically
+  await sleep(2000);
+  console.log(`tilting down ${TILT_DOWN} steps...`);
+  for (let i = 0; i < TILT_DOWN; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: 4 } }),
+      channel: device.getChannel(),
+    }, {});
+    await sleep(500);
+  }
+  await sleep(1500);
+  console.log(`panning left ${PAN_LEFT} extra step(s)...`);
+  for (let i = 0; i < PAN_LEFT; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: 1 } }),
+      channel: device.getChannel(),
+    }, {});
+    await sleep(500);
+  }
+  await sleep(2000);
   console.log('starting 360° rotation...');
   station.p2pSession.sendCommandWithStringPayload({
     commandType: CMD_DOORBELL_SET_PAYLOAD,
