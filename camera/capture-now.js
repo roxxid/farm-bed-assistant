@@ -11,6 +11,9 @@ const OUT = process.argv[3] || '/tmp/capture-now.jpg';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+// swallow EPIPE (videostream keeps writing after ffmpeg grabs its 1 frame)
+process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; console.error('UNCAUGHT:', e.message); process.exit(1); });
+
 function grabFrame(driver, outPath, timeoutMs = 40000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => { cleanup(); resolve(false); }, timeoutMs);

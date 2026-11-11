@@ -9,6 +9,7 @@ import sqlite3
 import json
 import base64
 import subprocess
+import threading
 import time
 import urllib.request
 from datetime import datetime, timedelta
@@ -313,11 +314,13 @@ def api_media():
 CAM_SERIAL = "T8171T1025090F93"
 DIR_MAP = {"left": 1, "right": 2, "up": 3, "down": 4}
 PRESET_MAP = {"bed": 1, "rest": 0}
+_cam_lock = threading.Lock()  # serialize camera ops — the E30 can't do concurrent commands
 
 
-def _run_cam(*args, timeout=120):
-    r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
-                       capture_output=True, text=True, timeout=timeout)
+def _run_cam(*args, timeout=150):
+    with _cam_lock:
+        r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
+                           capture_output=True, text=True, timeout=timeout)
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
