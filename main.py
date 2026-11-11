@@ -8,6 +8,8 @@ import os
 import sqlite3
 import json
 import base64
+import subprocess
+import time
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -303,6 +305,69 @@ def api_media():
                                 "captured_at": captured_at, "analysis": analysis})
     out.sort(key=lambda m: m.get("captured_at") or "", reverse=True)
     return {"media": out}
+
+
+# ---------------------------------------------------------------------------
+# camera controls (drive the E30 via the homebridge container)
+# ---------------------------------------------------------------------------
+CAM_SERIAL = "T8171T1025090F93"
+DIR_MAP = {"left": 1, "right": 2, "up": 3, "down": 4}
+PRESET_MAP = {"bed": 1, "rest": 0}
+
+
+def _run_cam(*args, timeout=120):
+    r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
+                       capture_output=True, text=True, timeout=timeout)
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
+class CamMove(BaseModel):
+    direction: str
+    steps: int = 1
+
+
+@app.post("/api/camera/move")
+def camera_move(body: CamMove):
+    d = DIR_MAP.get(body.direction)
+    if d is None:
+        raise HTTPException(400, "direction must be left/right/up/down")
+    steps = max(1, min(int(body.steps), 20))
+    code, out = _run_cam("/tmp/camera-move.js", str(d), str(steps), CAM_SERIAL)
+    return {"ok": code == 0, "out": out.strip()[-200:]}
+
+
+class CamPreset(BaseModel):
+    preset: str  # "bed" or "rest"
+
+
+@app.post("/api/camera/preset")
+def camera_preset(body: CamPreset):
+    p = PRESET_MAP.get(body.preset)
+    if p is None:
+        raise HTTPException(400, "preset must be bed/rest")
+    code, out = _run_cam("/tmp/preset.js", str(p), CAM_SERIAL)
+    return {"ok": code == 0, "out": out.strip()[-200:]}
+
+
+@app.post("/api/camera/snapshot")
+def camera_snapshot():
+    """Grab a fresh frame from the camera's current view + serve it."""
+    code, out = _run_cam("/tmp/capture-now.js", CAM_SERIAL, "/tmp/snap.jpg")
+    if code != 0:
+        raise HTTPException(502, f"capture failed: {out.strip()[-200:]}")
+    subprocess.run(["docker", "cp", "homebridge:/tmp/snap.jpg", "/data/media/live-snap.jpg"],
+                   capture_output=True, timeout=60)
+    return {"url": f"/media/live-snap.jpg?v={int(time.time())}"}
+
+
+@app.post("/api/camera/save-preset")
+def camera_save_preset(body: CamPreset):
+    """Save the camera's CURRENT position as a named preset (bed/rest)."""
+    p = PRESET_MAP.get(body.preset)
+    if p is None:
+        raise HTTPException(400, "preset must be bed/rest")
+    code, out = _run_cam("/tmp/save-preset.js", str(p), CAM_SERIAL)
+    return {"ok": code == 0, "out": out.strip()[-200:]}
 
 
 # ---------------------------------------------------------------------------

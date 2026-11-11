@@ -56,8 +56,21 @@
       <div class="view" id="viewCam" hidden>
         <div class="panel">
           <div class="panel-head" style="display:flex;align-items:center;justify-content:space-between">
-            <h3 style="margin:0">Latest from the camera</h3>
+            <h3 style="margin:0">Camera — aim the view</h3>
             <button class="btn" id="btnRefresh">↻ Refresh</button>
+          </div>
+          <div class="cam-ctl">
+            <div class="dpad">
+              <button class="dp dp-up" data-dir="up">▲</button>
+              <button class="dp dp-left" data-dir="left">◀</button>
+              <button class="dp dp-right" data-dir="right">▶</button>
+              <button class="dp dp-down" data-dir="down">▼</button>
+            </div>
+            <div class="cam-side">
+              <button class="btn primary" id="btnSnap">📸 Capture now</button>
+              <button class="btn" id="btnSaveBed">Save as bed position</button>
+              <div class="cam-status" id="camStatus"></div>
+            </div>
           </div>
           <div class="latest" id="latest"></div>
           <div class="sub">swipe → through past captures</div>
@@ -326,6 +339,43 @@ $('#btnRefresh').addEventListener('click', () => renderCamera());
 setInterval(() => {
   if (!$('#viewCam').hidden) renderCamera();
 }, 60000);
+
+/* ---------- camera pan/tilt controls ---------- */
+const camStatus = (msg) => { $('#camStatus').textContent = msg; };
+document.querySelectorAll('.dpad .dp').forEach(btn => btn.addEventListener('click', async () => {
+  const dir = btn.dataset.dir;
+  camStatus(`moving ${dir}…`);
+  try {
+    await API.post('/api/camera/move', { direction: dir, steps: 1 });
+    camStatus(`moved ${dir} — tap 📸 to see`);
+  } catch (e) {
+    camStatus(`move failed: ${e}`);
+  }
+}));
+$('#btnSnap').addEventListener('click', async () => {
+  camStatus('capturing…');
+  try {
+    const r = await API.post('/api/camera/snapshot', {});
+    const img = document.createElement('img');
+    img.src = r.url;
+    img.alt = 'live snapshot';
+    const latest = $('#latest');
+    latest.innerHTML = `<div class="shot"></div>`;
+    latest.querySelector('.shot').appendChild(img);
+    camStatus('captured — is this the bed?');
+  } catch (e) {
+    camStatus(`capture failed: ${e}`);
+  }
+});
+$('#btnSaveBed').addEventListener('click', async () => {
+  camStatus('saving bed position…');
+  try {
+    await API.post('/api/camera/save-preset', { preset: 'bed' });
+    camStatus('saved as bed position ✓');
+  } catch (e) {
+    camStatus(`save failed: ${e}`);
+  }
+});
 </script>
 </body>
 </html>
