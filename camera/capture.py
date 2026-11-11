@@ -26,7 +26,7 @@ MEDIA_ROOT = "/mnt/user/appdata/farm-bed/media"
 SERIAL = "T8171T1025090F93"  # Backyard SoloCam E30
 SWEEP_FRAMES = 26   # frames captured across the 360° rotation
 BED_FRAME = 18      # the frame where the bed lands (full view)
-TILT_DOWN = 3       # tilt-down steps (curise_type=4) to center the bed vertically
+TILT_DOWN = 1       # tilt-down steps (curise_type=4) — 1 small step (3 was way too far down)
 PAN_LEFT = 1        # extra pan-left steps (curise_type=1) to center horizontally
 ZOOM = 0.6  # crop to the central 60% (~1.7x zoom) to focus on the bed
 
