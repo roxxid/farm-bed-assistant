@@ -13,6 +13,7 @@ const FRAMES = parseInt(process.argv[4] || '14', 10);
 const TILT_DOWN = parseInt(process.argv[5] || '4', 10);  // curise_type=4 (tilt down) steps from the top
 const PAN_LEFT = parseInt(process.argv[6] || '2', 10);   // curise_type=1 (pan left) extra steps
 const TILT_UP_RESET = parseInt(process.argv[7] || '8', 10); // curise_type=3 (tilt up) to reset to the top first
+const FPS = parseInt(process.argv[8] || '2', 10); // frames per second (2 = finer granularity)
 
 const CMD_DOORBELL_SET_PAYLOAD = 1700;
 const CMD_OUTDOOR_ROTATE = 6038;
@@ -48,7 +49,7 @@ process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; co
       videostream.on('error', () => {});
       // grab FRAMES frames at ~1 fps across the rotation
       ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'h264', '-i', 'pipe:0',
-        '-vf', 'fps=1', '-frames:v', String(FRAMES), '-q:v', '2', `${prefix}%03d.jpg`]);
+        '-vf', `fps=${FPS}`, '-frames:v', String(FRAMES), '-q:v', '2', `${prefix}%03d.jpg`]);
       ff.on('error', () => {});
       ff.on('close', () => { clearTimeout(timer); resolve(); });
       videostream.pipe(ff.stdin);
