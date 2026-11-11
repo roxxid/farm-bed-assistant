@@ -14,7 +14,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 // swallow EPIPE (videostream keeps writing after ffmpeg grabs its 1 frame)
 process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; console.error('UNCAUGHT:', e.message); process.exit(1); });
 
-function grabFrame(driver, outPath, timeoutMs = 40000) {
+function grabFrame(driver, outPath, timeoutMs = 30000) {
   return new Promise((resolve) => {
     const timer = setTimeout(() => { cleanup(); resolve(false); }, timeoutMs);
     let ff = null;
@@ -39,7 +39,7 @@ function grabFrame(driver, outPath, timeoutMs = 40000) {
   });
 }
 
-async function grabWithRetry(driver, outPath, attempts = 5) {
+async function grabWithRetry(driver, outPath, attempts = 3) {
   for (let i = 0; i < attempts; i++) {
     if (await grabFrame(driver, outPath)) return true;
     console.log(`attempt ${i + 1}/${attempts} failed — retrying`);

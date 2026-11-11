@@ -319,18 +319,25 @@ _cam_lock = threading.Lock()  # serialize camera ops — the E30 can't do concur
 
 def _run_cam(*args, timeout=150):
     with _cam_lock:
-        for attempt in range(5):
-            r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
-                               capture_output=True, text=True, timeout=timeout)
-            out = (r.stdout or "") + (r.stderr or "")
-            if r.returncode == 0:
-                return 0, out
-            # transient docker exec bug — retry
-            if "OCI runtime exec failed" in out:
+        last = ""
+        for attempt in range(8):
+            try:
+                r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
+                                   capture_output=True, text=True, timeout=timeout)
+                out = (r.stdout or "") + (r.stderr or "")
+                if r.returncode == 0:
+                    return 0, out
+                last = out
+                # transient docker exec bug — retry with growing backoff
+                if "OCI runtime exec failed" in out:
+                    time.sleep(5 + attempt * 3)
+                    continue
+                return r.returncode, out
+            except subprocess.TimeoutExpired:
+                last = f"timeout after {timeout}s"
                 time.sleep(5)
                 continue
-            return r.returncode, out
-        return 1, "docker exec failed after retries"
+        return 1, f"docker exec failed after retries: {last.strip()[-200:]}"
 
 
 class CamMove(BaseModel):
@@ -371,6 +378,7 @@ def camera_snapshot():
             subprocess.run(["docker", "cp", "homebridge:/tmp/snap.jpg", "/data/media/live-snap.jpg"],
                            capture_output=True, timeout=60)
             return {"url": f"/media/live-snap.jpg?v={int(time.time())}"}
+        print(f"[SNAP] attempt {attempt} failed: {out.strip()[-400:]}", flush=True)
         time.sleep(4)
     raise HTTPException(502, f"capture failed: {out.strip()[-200:]}")
 

@@ -5,7 +5,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # docker CLI (static binary) — lets the app drive the camera via the host docker socket
-RUN python3 -c "import urllib.request; urllib.request.urlretrieve('https://download.docker.com/linux/static/stable/x86_64/docker-27.3.1.tgz', '/tmp/d.tgz')" \
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve('https://download.docker.com/linux/static/stable/x86_64/docker-29.5.3.tgz', '/tmp/d.tgz')" \
  && tar xzf /tmp/d.tgz -C /usr/local/bin --strip-components=1 docker/docker \
  && chmod +x /usr/local/bin/docker && rm /tmp/d.tgz
 
