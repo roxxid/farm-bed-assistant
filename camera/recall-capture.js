@@ -50,8 +50,8 @@ async function grabWithRetry(driver, outPath, attempts = 3) {
   for (let i = 0; i < 40; i++) { connected = station.isConnected(); if (connected) break; await sleep(1000); }
   if (!connected) { console.log('NOT CONNECTED'); process.exit(1); }
 
-  await station.presetPosition(device, 0); // recall PRESET_1 (the bed)
-  console.log('recalled PRESET_1');
+  await station.presetPosition(device, 1); // recall PRESET_2 (the bed; preset 1 = backyard is the user's)
+  console.log('recalled PRESET_2 (bed)');
   await sleep(10000); // let the camera physically move to the saved position
 
   const ok = await grabWithRetry(driver, OUT);
