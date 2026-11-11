@@ -36,17 +36,31 @@
         <h2>The Bed — 6×6</h2>
         <span class="meta" id="bedMeta"></span>
         <div class="actions">
+          <div class="viewtoggle" id="viewToggle">
+            <button class="vt active" data-view="grid">Grid</button>
+            <button class="vt" data-view="cam">Camera</button>
+          </div>
           <button class="btn primary" id="btnAutofill">Autofill plan</button>
           <button class="btn" id="btnClear">Clear</button>
         </div>
       </div>
-      <div class="bed" id="bed"></div>
-      <div class="legend">
-        <span><span class="swatch s-ready"></span> ready to harvest</span>
-        <span><span class="swatch s-soil"></span> empty square</span>
-        <span>tap a square to edit</span>
+      <div class="view" id="viewGrid">
+        <div class="bed" id="bed"></div>
+        <div class="legend">
+          <span><span class="swatch s-ready"></span> ready to harvest</span>
+          <span><span class="swatch s-soil"></span> empty square</span>
+          <span>tap a square to edit</span>
+        </div>
+        <div id="calendar"></div>
       </div>
-      <div id="calendar"></div>
+      <div class="view" id="viewCam" hidden>
+        <div class="panel">
+          <h3>Latest from the camera</h3>
+          <div class="latest" id="latest"></div>
+          <div class="sub">swipe → through past captures</div>
+          <div class="strip" id="strip"></div>
+        </div>
+      </div>
     </main>
 
     <aside class="inspector" id="inspector"></aside>
@@ -255,6 +269,55 @@ $('#btnClear').addEventListener('click', async () => {
   renderPalette();
   await reload();
 })();
+
+/* ---------- Grid / Camera toggle ---------- */
+function showLatestCam(m) {
+  const isVideo = m.kind === 'sweep';
+  $('#latest').innerHTML = `
+    <div class="shot">${isVideo
+      ? `<video src="${m.url}" controls autoplay></video>`
+      : `<img src="${m.url}" alt="capture">`}</div>
+    ${m.analysis ? `<div class="ai"><b>AI read:</b> ${m.analysis}</div>` : ''}
+    <div style="color:var(--ink-soft);font-size:12px">${m.kind} · ${m.captured_at ? fmtDateFull(m.captured_at) : ''}</div>`;
+}
+async function renderCamera() {
+  let media;
+  try { media = await API.get('/api/media'); } catch { media = { media: [] }; }
+  const m = media.media || [];
+  if (!m.length) {
+    $('#latest').innerHTML = '<div class="empty">No captures yet — the camera service runs hourly.</div>';
+    $('#strip').innerHTML = '';
+    return;
+  }
+  showLatestCam(m[0]);
+  $('#strip').innerHTML = m.map(x => {
+    const isVideo = x.kind === 'sweep';
+    return `<div class="thumb" data-url="${x.url}" data-kind="${x.kind}" data-analysis="${encodeURIComponent(x.analysis || '')}">
+      ${isVideo
+        ? '<span style="display:grid;place-items:center;height:100%;font-size:28px;color:#fff">▶</span>'
+        : `<img src="${x.url}" alt="" loading="lazy">`}
+      <span class="badge">${x.kind}</span><span class="when">${fmtDate(x.captured_at)}</span>
+    </div>`;
+  }).join('');
+  $('#strip').querySelectorAll('.thumb').forEach(t => t.addEventListener('click', () => {
+    showLatestCam({ url: t.dataset.url, kind: t.dataset.kind, analysis: decodeURIComponent(t.dataset.analysis) });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+}
+$('#viewToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.vt'); if (!btn) return;
+  const v = btn.dataset.view;
+  $('#viewGrid').hidden = v !== 'grid';
+  $('#viewCam').hidden = v !== 'cam';
+  document.querySelectorAll('.vt').forEach(b => b.classList.toggle('active', b.dataset.view === v));
+  if (isDesktop()) {
+    const palette = document.querySelector('.palette');
+    const inspector = document.querySelector('#inspector');
+    if (palette) palette.style.display = v === 'grid' ? '' : 'none';
+    if (inspector) inspector.style.display = v === 'grid' ? '' : 'none';
+  }
+  if (v === 'cam') renderCamera();
+});
 </script>
 </body>
 </html>

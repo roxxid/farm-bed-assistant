@@ -173,6 +173,10 @@ button { font-family: var(--font-ui); cursor: pointer; }
 .stage-head .meta { color: var(--ink-soft); font-size: 12.5px; }
 .stage-head .actions { display: flex; gap: 8px; width: 100%; }
 .stage-head .actions .btn { flex: 1; }
+.viewtoggle { display: inline-flex; background: var(--line); border-radius: 10px; padding: 3px; gap: 2px; }
+.viewtoggle .vt { border: none; background: transparent; padding: 8px 16px; border-radius: 8px; font-weight: 700; font-size: 13px; cursor: pointer; color: var(--ink-soft); font-family: inherit; }
+.viewtoggle .vt.active { background: var(--card); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.view[hidden] { display: none !important; }
 .bed {
   display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;
   background: var(--soil); padding: 12px;
