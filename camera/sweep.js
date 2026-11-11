@@ -10,8 +10,9 @@ const eufy = cfg.platforms.find(p => p.platform === 'EufySecurity');
 const SERIAL = process.argv[2] || 'T8171T1025090F93';
 const OUTDIR = process.argv[3] || '/tmp/sweep';
 const FRAMES = parseInt(process.argv[4] || '14', 10);
-const TILT_DOWN = parseInt(process.argv[5] || '3', 10);  // curise_type=4 (tilt down) steps to center vertically
-const PAN_LEFT = parseInt(process.argv[6] || '1', 10);   // curise_type=1 (pan left) extra steps to center horizontally
+const TILT_DOWN = parseInt(process.argv[5] || '4', 10);  // curise_type=4 (tilt down) steps from the top
+const PAN_LEFT = parseInt(process.argv[6] || '2', 10);   // curise_type=1 (pan left) extra steps
+const TILT_UP_RESET = parseInt(process.argv[7] || '8', 10); // curise_type=3 (tilt up) to reset to the top first
 
 const CMD_DOORBELL_SET_PAYLOAD = 1700;
 const CMD_OUTDOOR_ROTATE = 6038;
@@ -56,9 +57,19 @@ process.on('uncaughtException', (e) => { if (e && e.code === 'EPIPE') return; co
     driver.startStationLivestream(SERIAL).then(() => {}).catch(() => { clearTimeout(timer); resolve(); });
   });
 
-  // wait for the stream to spin up, then tilt down to center the bed vertically
+  // wait for the stream to spin up, then reset tilt to the top (known reference)
   await sleep(2000);
-  console.log(`tilting down ${TILT_DOWN} steps...`);
+  console.log(`resetting tilt up ${TILT_UP_RESET} steps (to top)...`);
+  for (let i = 0; i < TILT_UP_RESET; i++) {
+    station.p2pSession.sendCommandWithStringPayload({
+      commandType: CMD_DOORBELL_SET_PAYLOAD,
+      value: JSON.stringify({ commandType: CMD_OUTDOOR_ROTATE, data: { curise_type: 3 } }),
+      channel: device.getChannel(),
+    }, {});
+    await sleep(500);
+  }
+  await sleep(2000);
+  console.log(`tilting down ${TILT_DOWN} steps from top...`);
   for (let i = 0; i < TILT_DOWN; i++) {
     station.p2pSession.sendCommandWithStringPayload({
       commandType: CMD_DOORBELL_SET_PAYLOAD,
