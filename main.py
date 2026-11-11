@@ -319,9 +319,18 @@ _cam_lock = threading.Lock()  # serialize camera ops — the E30 can't do concur
 
 def _run_cam(*args, timeout=150):
     with _cam_lock:
-        r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
-                           capture_output=True, text=True, timeout=timeout)
-    return r.returncode, (r.stdout or "") + (r.stderr or "")
+        for attempt in range(5):
+            r = subprocess.run(["docker", "exec", "homebridge", "node", *args],
+                               capture_output=True, text=True, timeout=timeout)
+            out = (r.stdout or "") + (r.stderr or "")
+            if r.returncode == 0:
+                return 0, out
+            # transient docker exec bug — retry
+            if "OCI runtime exec failed" in out:
+                time.sleep(5)
+                continue
+            return r.returncode, out
+        return 1, "docker exec failed after retries"
 
 
 class CamMove(BaseModel):
