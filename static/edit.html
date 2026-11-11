@@ -56,21 +56,8 @@
       <div class="view" id="viewCam" hidden>
         <div class="panel">
           <div class="panel-head" style="display:flex;align-items:center;justify-content:space-between">
-            <h3 style="margin:0">Camera — aim the view</h3>
+            <h3 style="margin:0">Camera — bed captures</h3>
             <button class="btn" id="btnRefresh">↻ Refresh</button>
-          </div>
-          <div class="cam-ctl">
-            <div class="dpad">
-              <button class="dp dp-up" data-dir="up">▲</button>
-              <button class="dp dp-left" data-dir="left">◀</button>
-              <button class="dp dp-right" data-dir="right">▶</button>
-              <button class="dp dp-down" data-dir="down">▼</button>
-            </div>
-            <div class="cam-side">
-              <button class="btn primary" id="btnSnap">📸 Capture now</button>
-              <button class="btn" id="btnSaveBed">Save as bed position</button>
-              <div class="cam-status" id="camStatus"></div>
-            </div>
           </div>
           <div class="latest" id="latest"></div>
           <div class="sub">swipe → through past captures</div>
@@ -340,57 +327,8 @@ setInterval(() => {
   if (!$('#viewCam').hidden) renderCamera();
 }, 60000);
 
-/* ---------- camera pan/tilt controls ---------- */
-let camBusy = false;
-const camBtns = () => [...document.querySelectorAll('.dpad .dp, #btnSnap, #btnSaveBed, #btnRefresh')];
-const setCamBusy = (b) => {
-  camBusy = b;
-  camBtns().forEach(x => x.disabled = b);
-};
-const camStatus = (msg) => { $('#camStatus').textContent = msg; };
-document.querySelectorAll('.dpad .dp').forEach(btn => btn.addEventListener('click', async () => {
-  if (camBusy) return;
-  const dir = btn.dataset.dir;
-  setCamBusy(true);
-  camStatus(`moving ${dir}… (this takes ~30s)`);
-  try {
-    await API.post('/api/camera/move', { direction: dir, steps: 2 });
-    camStatus(`moved ${dir} — tap 📸 to see`);
-  } catch (e) {
-    camStatus(`move failed: ${e}`);
-  }
-  setCamBusy(false);
-}));
-$('#btnSnap').addEventListener('click', async () => {
-  if (camBusy) return;
-  setCamBusy(true);
-  camStatus('capturing… (up to ~60s)');
-  try {
-    const r = await API.post('/api/camera/snapshot', {});
-    const img = document.createElement('img');
-    img.src = r.url;
-    img.alt = 'live snapshot';
-    const latest = $('#latest');
-    latest.innerHTML = `<div class="shot"></div>`;
-    latest.querySelector('.shot').appendChild(img);
-    camStatus('captured — is this the bed?');
-  } catch (e) {
-    camStatus(`capture failed: ${e}`);
-  }
-  setCamBusy(false);
-});
-$('#btnSaveBed').addEventListener('click', async () => {
-  if (camBusy) return;
-  setCamBusy(true);
-  camStatus('saving bed position…');
-  try {
-    await API.post('/api/camera/save-preset', { preset: 'bed' });
-    camStatus('saved as bed position ✓');
-  } catch (e) {
-    camStatus(`save failed: ${e}`);
-  }
-  setCamBusy(false);
-});
+/* camera pan/tilt controls removed — bed position is saved + recalled server-side via preset */
+
 </script>
 </body>
 </html>

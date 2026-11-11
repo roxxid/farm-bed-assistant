@@ -44,15 +44,14 @@ def sh(cmd, timeout=120):
 
 
 def run_camera():
-    """Rotate the camera (360° sweep) + capture frames; return the bed frame. Retries docker exec."""
-    cmd = (f"docker exec homebridge node /tmp/sweep.js {SERIAL} /tmp/sweep "
-           f"{SWEEP_FRAMES} {TILT_DOWN} {PAN_LEFT} {TILT_UP_RESET}")
+    """Recall the saved bed position (PRESET_1) + capture the view. Retries docker exec."""
+    cmd = f"docker exec homebridge node /tmp/recall-capture.js {SERIAL} /tmp/bed.jpg"
     for attempt in range(5):
-        r = sh(cmd, timeout=360)
+        r = sh(cmd, timeout=180)
         if r.stdout:
             print(r.stdout.strip())
         if r.returncode == 0:
-            return f"/tmp/sweep/sweep_{BED_FRAME:03d}.jpg"
+            return "/tmp/bed.jpg"
         out = (r.stdout + r.stderr).strip()
         if "OCI runtime exec failed" in out:
             print(f"docker exec transient failure (attempt {attempt + 1}/5), retrying...")
