@@ -55,7 +55,10 @@
       </div>
       <div class="view" id="viewCam" hidden>
         <div class="panel">
-          <h3>Latest from the camera</h3>
+          <div class="panel-head" style="display:flex;align-items:center;justify-content:space-between">
+            <h3 style="margin:0">Latest from the camera</h3>
+            <button class="btn" id="btnRefresh">↻ Refresh</button>
+          </div>
           <div class="latest" id="latest"></div>
           <div class="sub">swipe → through past captures</div>
           <div class="strip" id="strip"></div>
@@ -318,6 +321,11 @@ $('#viewToggle').addEventListener('click', (e) => {
   }
   if (v === 'cam') renderCamera();
 });
+$('#btnRefresh').addEventListener('click', () => renderCamera());
+// auto-refresh the camera view every 60s while it's open (near-live feel)
+setInterval(() => {
+  if (!$('#viewCam').hidden) renderCamera();
+}, 60000);
 </script>
 </body>
 </html>
